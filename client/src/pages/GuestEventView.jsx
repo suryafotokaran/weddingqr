@@ -3,6 +3,53 @@ import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, Lock, Image as ImageIcon, Heart, ShieldAlert, Download, Eye, EyeOff } from 'lucide-react';
 
+function SkeletonBlock({ className = "" }) {
+  return (
+    <div className={`relative overflow-hidden bg-zinc-200 rounded-xl ${className}`}>
+      <div className="absolute inset-0 skeleton-shimmer" />
+    </div>
+  );
+}
+
+function GuestSkeleton() {
+  return (
+    <div className="min-h-screen bg-zinc-50">
+      <header className="bg-white border-b border-zinc-100 px-6 pt-6 pb-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <div className="space-y-2">
+              <SkeletonBlock className="w-48 h-6" />
+              <SkeletonBlock className="w-32 h-3" />
+            </div>
+            <SkeletonBlock className="w-10 h-10 rounded-full" />
+          </div>
+          <div className="flex gap-6">
+            <SkeletonBlock className="w-20 h-4" />
+            <SkeletonBlock className="w-20 h-4" />
+          </div>
+        </div>
+      </header>
+      <main className="max-w-6xl mx-auto p-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => (
+            <SkeletonBlock key={i} className="aspect-square" />
+          ))}
+        </div>
+      </main>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+        .skeleton-shimmer {
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+          animation: shimmer 1.5s infinite;
+        }
+      `}} />
+    </div>
+  );
+}
+
 export default function GuestEventView() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
@@ -207,11 +254,7 @@ export default function GuestEventView() {
   };
 
   if (loading && !event) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
-        <Loader2 className="animate-spin text-teal-600" size={32} />
-      </div>
-    );
+    return <GuestSkeleton />;
   }
 
   if (error) {

@@ -22,6 +22,86 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function SkeletonBlock({ className = "" }) {
+  return (
+    <div className={`relative overflow-hidden bg-zinc-200 rounded-xl ${className}`}>
+      <div className="absolute inset-0 skeleton-shimmer" />
+    </div>
+  );
+}
+
+function ActionOverlay({ message = "Processing..." }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+      <div className="absolute inset-0 bg-white/40 backdrop-blur-md" />
+      <div className="relative bg-white rounded-3xl shadow-2xl shadow-zinc-200 border border-zinc-100 p-8 flex flex-col items-center gap-4 min-w-[240px] animate-in zoom-in-95 duration-300">
+        <div className="w-16 h-16 rounded-3xl silk-gradient flex items-center justify-center shadow-lg shadow-teal-500/20">
+          <Loader2 className="w-8 h-8 text-white animate-spin" />
+        </div>
+        <div className="text-center">
+          <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">{message}</p>
+          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter mt-1">Please wait a moment</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EventSkeleton() {
+  return (
+    <DashboardLayout>
+      <div className="max-w-5xl mx-auto py-6 animate-pulse">
+        {/* Back button skeleton */}
+        <div className="w-32 h-4 bg-zinc-200 rounded-full mb-6" />
+
+        {/* Header skeleton */}
+        <div className="bg-white rounded-2xl p-7 mb-6 border border-zinc-100">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="space-y-3">
+              <SkeletonBlock className="w-24 h-3" />
+              <SkeletonBlock className="w-64 h-8" />
+              <div className="flex gap-4">
+                <SkeletonBlock className="w-32 h-4" />
+                <SkeletonBlock className="w-32 h-4" />
+              </div>
+            </div>
+            <SkeletonBlock className="w-40 h-16 md:w-48" />
+          </div>
+        </div>
+
+        {/* Grid skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <SkeletonBlock className="h-48" />
+          <SkeletonBlock className="h-48" />
+        </div>
+
+        <div className="bg-white rounded-2xl p-7 border border-zinc-100">
+          <div className="flex gap-6 border-b border-zinc-100 mb-8 pb-4">
+            <SkeletonBlock className="w-24 h-4" />
+            <SkeletonBlock className="w-24 h-4" />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
+              <SkeletonBlock key={i} className="aspect-square" />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+        .skeleton-shimmer {
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+          animation: shimmer 1.5s infinite;
+        }
+      `}} />
+    </DashboardLayout>
+  );
+}
+
 function UploadItem({ item }) {
   const statusIcon = {
     pending:   <Loader2 size={16} className="text-zinc-400 animate-spin" />,
@@ -74,6 +154,7 @@ export default function EventDetail() {
   const [copied, setCopied] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
   const [activeTab, setActiveTab] = useState('all'); // 'all' or 'selected'
   const fileInputRef                = useRef(null);
 
@@ -86,8 +167,8 @@ export default function EventDetail() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  const fetchEvent = useCallback(async () => {
-    setLoading(true);
+  const fetchEvent = useCallback(async (isInitial = false) => {
+    if (isInitial) setLoading(true);
     const { data: ev } = await supabase
       .from('events')
       .select('*')
@@ -101,14 +182,14 @@ export default function EventDetail() {
       .eq('event_id', id)
       .order('created_at', { ascending: false });
     setPhotos(ph ?? []);
-    setLoading(false);
+    if (isInitial) setLoading(false);
   }, [id]);
 
   useEffect(() => { 
     if (event) setTempPassword(event.password || '');
   }, [event]);
 
-  useEffect(() => { fetchEvent(); }, [fetchEvent]);
+  useEffect(() => { fetchEvent(true); }, [fetchEvent]);
 
   // ── Upload to Supabase Storage ────────────────────────────────────────────
   const uploadFiles = useCallback(async (files) => {
@@ -213,7 +294,7 @@ export default function EventDetail() {
 
   const handleSavePassword = async () => {
     if (!event) return;
-    setIsSavingPassword(true);
+    setActionLoading({ loading: true, message: 'Saving Password...' });
     try {
       const { error } = await supabase
         .from('events')
@@ -226,7 +307,7 @@ export default function EventDetail() {
     } catch (err) {
       showToast('error', 'Update Failed', err.message);
     } finally {
-      setIsSavingPassword(false);
+      setActionLoading({ loading: false, message: '' });
     }
   };
 
@@ -269,7 +350,7 @@ export default function EventDetail() {
   const handleDeleteSelected = async () => {
     if (!window.confirm(`Are you sure you want to delete ${selectedIds.size} photos? This cannot be undone.`)) return;
     
-    setIsDeleting(true);
+    setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos...` });
     try {
       const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
       const storagePaths = selectedPhotos.map(p => p.storage_path);
@@ -295,7 +376,7 @@ export default function EventDetail() {
     } catch (err) {
       showToast('error', 'Deletion Failed', err.message);
     } finally {
-      setIsDeleting(false);
+      setActionLoading({ loading: false, message: '' });
     }
   };
 
@@ -326,6 +407,7 @@ export default function EventDetail() {
 
   const updateEventSetting = async (key, value, successTitle, successMsg) => {
     if (!event) return;
+    setActionLoading({ loading: true, message: 'Updating Settings...' });
     try {
       const { error } = await supabase
         .from('events')
@@ -337,6 +419,8 @@ export default function EventDetail() {
       await fetchEvent();
     } catch (err) {
       showToast('error', 'Update Failed', err.message);
+    } finally {
+      setActionLoading({ loading: false, message: '' });
     }
   };
 
@@ -370,14 +454,8 @@ export default function EventDetail() {
     );
   };
 
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-64">
-          <Loader2 className="animate-spin text-teal-600" size={32} />
-        </div>
-      </DashboardLayout>
-    );
+  if (loading && !event) {
+    return <EventSkeleton />;
   }
 
   if (!event) {
@@ -788,6 +866,7 @@ export default function EventDetail() {
       </div>
 
       <Toast toast={toast} onClose={() => setToast(null)} />
+      {actionLoading.loading && <ActionOverlay message={actionLoading.message} />}
     </DashboardLayout>
   );
 }
