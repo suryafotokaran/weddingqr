@@ -12,6 +12,7 @@ import Pricing from './pages/Pricing';
 import CreateEvent from './pages/CreateEvent';
 import EventDetail from './pages/EventDetail';
 import Events from './pages/Events';
+import GuestEventView from './pages/GuestEventView';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
       <Route path="/events" element={<ProtectedRoute><Events /></ProtectedRoute>} />
       <Route path="/createevent" element={<ProtectedRoute><CreateEvent /></ProtectedRoute>} />
       <Route path="/events/:id" element={<ProtectedRoute><EventDetail /></ProtectedRoute>} />
+      <Route path="/v/:id" element={<GuestEventView />} />
 
       {/* Legacy redirect */}
       <Route path="/events/new" element={<ProtectedRoute><Navigate to="/pricing" replace /></ProtectedRoute>} />

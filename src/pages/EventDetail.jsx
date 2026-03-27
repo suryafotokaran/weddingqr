@@ -9,6 +9,8 @@ import UpgradePlan from '../components/UpgradePlan';
 import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ImageIcon,
   CalendarDays, Tag, Images, ArrowLeft, CloudUpload, ArrowUp,
+  Lock, Share2, Copy, Check, Trash2, Download, Square, CheckSquare,
+  Eye, EyeOff, Heart, MonitorOff
 } from 'lucide-react';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
@@ -67,7 +69,17 @@ export default function EventDetail() {
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast]           = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+  const [tempPassword, setTempPassword] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [activeTab, setActiveTab] = useState('all'); // 'all' or 'selected'
   const fileInputRef                = useRef(null);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [activeTab]);
 
   const showToast = (type, title, message) => {
     setToast({ type, title, message });
@@ -91,6 +103,10 @@ export default function EventDetail() {
     setPhotos(ph ?? []);
     setLoading(false);
   }, [id]);
+
+  useEffect(() => { 
+    if (event) setTempPassword(event.password || '');
+  }, [event]);
 
   useEffect(() => { fetchEvent(); }, [fetchEvent]);
 
@@ -193,6 +209,165 @@ export default function EventDetail() {
     showToast('success', 'Plan Upgraded!', `Event upgraded to ${newLimit} photo capacity.`);
     setShowUpgrade(false);
     await fetchEvent();
+  };
+
+  const handleSavePassword = async () => {
+    if (!event) return;
+    setIsSavingPassword(true);
+    try {
+      const { error } = await supabase
+        .from('events')
+        .update({ password: tempPassword })
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast('success', 'Privacy Updated', tempPassword ? 'Password set successfully.' : 'Password removed.');
+      await fetchEvent();
+    } catch (err) {
+      showToast('error', 'Update Failed', err.message);
+    } finally {
+      setIsSavingPassword(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    const link = `${window.location.origin}/v/${id}`;
+    navigator.clipboard.writeText(link);
+    setCopied(true);
+    showToast('success', 'Link Copied', 'Guest link copied to clipboard.');
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const toggleSelect = (photoId) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    const visiblePhotos = photos.filter(photo => activeTab === 'all' || (photo.likes_count || 0) > 0);
+    const allVisibleSelected = visiblePhotos.every(p => selectedIds.has(p.id));
+
+    if (allVisibleSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visiblePhotos.forEach(p => next.delete(p.id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        visiblePhotos.forEach(p => next.add(p.id));
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (!window.confirm(`Are you sure you want to delete ${selectedIds.size} photos? This cannot be undone.`)) return;
+    
+    setIsDeleting(true);
+    try {
+      const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
+      const storagePaths = selectedPhotos.map(p => p.storage_path);
+
+      // 1. Delete from Supabase Storage
+      const { error: storageErr } = await supabase.storage
+        .from('photos')
+        .remove(storagePaths);
+
+      if (storageErr) throw storageErr;
+
+      // 2. Delete from Database
+      const { error: dbErr } = await supabase
+        .from('photos')
+        .delete()
+        .in('id', Array.from(selectedIds));
+
+      if (dbErr) throw dbErr;
+
+      showToast('success', 'Deleted', `${selectedIds.size} photos removed successfully.`);
+      setSelectedIds(new Set());
+      await fetchEvent();
+    } catch (err) {
+      showToast('error', 'Deletion Failed', err.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDownloadSelected = async () => {
+    const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
+    
+    showToast('success', 'Downloading...', `Starting download for ${selectedPhotos.length} photos.`);
+    
+    for (const photo of selectedPhotos) {
+      try {
+        const response = await fetch(photo.supabase_url);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = photo.file_name;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        // Small delay to prevent browser being overwhelmed
+        await new Promise(r => setTimeout(r, 200));
+      } catch (err) {
+        console.error('Download failed for', photo.file_name, err);
+      }
+    }
+  };
+
+  const updateEventSetting = async (key, value, successTitle, successMsg) => {
+    if (!event) return;
+    try {
+      const { error } = await supabase
+        .from('events')
+        .update({ [key]: value })
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast('success', successTitle, successMsg);
+      await fetchEvent();
+    } catch (err) {
+      showToast('error', 'Update Failed', err.message);
+    }
+  };
+
+  const handleTogglePublic = () => {
+    const next = !event.is_public;
+    updateEventSetting(
+      'is_public', 
+      next, 
+      next ? 'Link Enabled' : 'Link Disabled', 
+      next ? 'Guests can now view the gallery.' : 'Public access has been suspended.'
+    );
+  };
+
+  const handleToggleDownload = () => {
+    const next = !event.allow_download;
+    updateEventSetting(
+      'allow_download', 
+      next, 
+      next ? 'Downloads Enabled' : 'Downloads Disabled', 
+      next ? 'Guests can now download their selected photos.' : 'Guest downloads have been disabled.'
+    );
+  };
+
+  const handleToggleScreenshot = () => {
+    const next = !event.allow_screenshot;
+    updateEventSetting(
+      'allow_screenshot', 
+      next, 
+      next ? 'Protection Enabled' : 'Protection Disabled', 
+      next ? 'Screenshot deterrents have been applied to guest view.' : 'Screenshot protection has been removed.'
+    );
   };
 
   if (loading) {
@@ -314,6 +489,116 @@ export default function EventDetail() {
           />
         )}
 
+        {/* Sharing & Privacy */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 border border-zinc-50 flex flex-col justify-between">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${event.is_public ? 'bg-teal-50 text-teal-600' : 'bg-zinc-100 text-zinc-400'}`}>
+                  {event.is_public ? <Eye size={16} /> : <EyeOff size={16} />}
+                </div>
+                <div>
+                  <h3 className="font-bold text-zinc-900 leading-none">Guest Link</h3>
+                  <p className="text-[10px] font-bold mt-1 uppercase tracking-tighter transition-colors" color={event.is_public ? 'text-teal-600' : 'text-zinc-400'}>
+                    {event.is_public ? 'Public & Active' : 'Hidden & Disabled'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggle Switch */}
+              <button 
+                onClick={handleTogglePublic}
+                className={`w-11 h-6 rounded-full p-1 transition-all duration-300 ${event.is_public ? 'bg-teal-500' : 'bg-zinc-200'}`}
+              >
+                <div className={`w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform duration-300 ${event.is_public ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <input 
+                readOnly
+                value={`${window.origin}/v/${id}`}
+                className={`flex-1 bg-zinc-50 border border-zinc-100 rounded-xl px-4 py-2.5 text-xs font-mono transition-opacity ${event.is_public ? 'opacity-100 text-zinc-500' : 'opacity-40 text-zinc-400'}`}
+              />
+              <button 
+                onClick={handleCopyLink}
+                className="px-4 py-2.5 rounded-xl bg-zinc-900 text-white text-xs font-bold hover:bg-zinc-800 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-30"
+              >
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+
+            {/* Permissions Toggles */}
+            <div className="mt-6 pt-6 border-t border-zinc-100 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${event.allow_download ? 'bg-teal-50 text-teal-600' : 'bg-zinc-100 text-zinc-400'}`}>
+                    <Download size={14} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-900">Allow Guest Downloads</h4>
+                    <p className="text-[10px] text-zinc-400">Guests can download their hearted photos</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleToggleDownload}
+                  className={`w-10 h-5 rounded-full p-1 transition-all duration-300 ${event.allow_download ? 'bg-teal-500' : 'bg-zinc-200'}`}
+                >
+                  <div className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform duration-300 ${event.allow_download ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${event.allow_screenshot ? 'bg-red-50 text-red-600' : 'bg-zinc-100 text-zinc-400'}`}>
+                    <MonitorOff size={14} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-900">Screenshot Protection</h4>
+                    <p className="text-[10px] text-zinc-400">Deter guests from taking screenshots</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleToggleScreenshot}
+                  className={`w-10 h-5 rounded-full p-1 transition-all duration-300 ${event.allow_screenshot ? 'bg-red-500' : 'bg-zinc-200'}`}
+                >
+                  <div className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform duration-300 ${event.allow_screenshot ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 border border-zinc-50 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-red-600">
+                  <Lock size={16} />
+                </div>
+                <h3 className="font-bold text-zinc-900">Password Protection</h3>
+              </div>
+              <p className="text-xs text-zinc-500 mb-4">Secure your event. Leave blank to disable.</p>
+            </div>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input 
+                  type="text"
+                  placeholder="Set password..."
+                  value={tempPassword}
+                  onChange={(e) => setTempPassword(e.target.value)}
+                  className="w-full bg-zinc-50 border border-zinc-100 rounded-xl px-4 py-2.5 text-xs font-bold text-zinc-700 outline-none focus:border-teal-500 transition-all"
+                />
+              </div>
+              <button 
+                onClick={handleSavePassword}
+                disabled={isSavingPassword || tempPassword === (event.password || '')}
+                className="px-6 py-2.5 rounded-xl silk-gradient text-white text-xs font-black disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all active:scale-95 shadow-lg shadow-teal-500/10"
+              >
+                {isSavingPassword ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Upload Zone */}
         <div
           onDrop={handleDrop}
@@ -376,12 +661,71 @@ export default function EventDetail() {
           </div>
         )}
 
-        {/* Photo Grid */}
+        {/* Photo Grid Section */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7">
+          
+          {/* Tabs */}
+          <div className="flex items-center gap-6 border-b border-zinc-100 mb-8">
+            <button 
+              onClick={() => setActiveTab('all')}
+              className={`pb-4 text-sm font-bold transition-all relative ${activeTab === 'all' ? 'text-teal-600' : 'text-zinc-400 hover:text-zinc-600'}`}
+            >
+              All Photos
+              {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-teal-600 rounded-full" />}
+            </button>
+            <button 
+              onClick={() => setActiveTab('selected')}
+              className={`pb-4 text-sm font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'selected' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
+            >
+              Guest Selections
+              <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'selected' ? 'bg-pink-100 text-pink-600' : 'bg-zinc-100 text-zinc-400'}`}>
+                {photos.filter(p => (p.likes_count || 0) > 0).length}
+              </div>
+              {activeTab === 'selected' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full" />}
+            </button>
+          </div>
+
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold tracking-tight text-zinc-900">
-              Photos <span className="text-zinc-400 font-medium text-base ml-1">({photos.length})</span>
-            </h2>
+            <div className="flex items-center gap-4">
+              <h2 className="text-xl font-bold tracking-tight text-zinc-900">
+                {activeTab === 'all' ? 'Event Gallery' : 'Guest Favorites'}
+              </h2>
+              {photos.length > 0 && (
+                <button 
+                  onClick={handleSelectAll}
+                  className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-teal-600 transition-colors"
+                >
+                  {photos.filter(p => activeTab === 'all' || (p.likes_count || 0) > 0).every(p => selectedIds.has(p.id)) ? <CheckSquare size={14} /> : <Square size={14} />}
+                  {photos.filter(p => activeTab === 'all' || (p.likes_count || 0) > 0).every(p => selectedIds.has(p.id)) ? 'Deselect All' : 'Select All'}
+                </button>
+              )}
+            </div>
+            
+            {/* Selection Actions Bar (Sticky) */}
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                <span className="text-xs font-bold text-zinc-500 mr-2">{selectedIds.size} Selected</span>
+                {activeTab === 'selected' && (
+                  <button 
+                    onClick={handleDownloadSelected}
+                    className="p-2 rounded-lg bg-zinc-50 text-zinc-600 hover:bg-teal-50 hover:text-teal-600 transition-all shadow-sm"
+                    title="Download Selected"
+                  >
+                    <Download size={16} />
+                  </button>
+                )}
+                {activeTab === 'all' && (
+                  <button 
+                    onClick={handleDeleteSelected}
+                    disabled={isDeleting}
+                    className="p-2 rounded-lg bg-zinc-50 text-zinc-600 hover:bg-red-50 hover:text-red-600 transition-all shadow-sm disabled:opacity-50"
+                    title="Delete Selected"
+                  >
+                    {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {photos.length === 0 ? (
@@ -392,10 +736,12 @@ export default function EventDetail() {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-              {photos.map(photo => (
+              {photos
+                .filter(photo => activeTab === 'all' || (photo.likes_count || 0) > 0)
+                .map(photo => (
                 <div
                   key={photo.id}
-                  className="group relative aspect-square rounded-xl overflow-hidden bg-zinc-100 shadow-sm hover:shadow-md transition-all duration-200"
+                  className={`group relative aspect-square rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${selectedIds.has(photo.id) ? 'ring-4 ring-teal-500/20' : 'bg-zinc-100'}`}
                 >
                   {photo.supabase_url ? (
                     <img
@@ -409,8 +755,28 @@ export default function EventDetail() {
                       <Loader2 size={20} className="animate-spin text-zinc-300" />
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                  <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+
+                  {/* Heart Badge (Admin only) */}
+                  {(photo.likes_count || 0) > 0 && (
+                    <div className="absolute top-2 left-2 z-10 px-1.5 py-1 rounded-lg bg-white/90 backdrop-blur-md shadow-sm border border-pink-100 flex items-center gap-1 animate-in zoom-in duration-300">
+                      <Heart size={10} className="text-pink-500" fill="currentColor" />
+                      <span className="text-[10px] font-black text-pink-600">{photo.likes_count}</span>
+                    </div>
+                  )}
+
+                  <div 
+                    onClick={(e) => { e.stopPropagation(); toggleSelect(photo.id); }}
+                    className={`absolute inset-0 transition-opacity duration-200 cursor-pointer ${selectedIds.has(photo.id) ? 'bg-teal-500/20 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'}`}
+                  >
+                    {/* Checkbox Trigger Area */}
+                    <div className="absolute top-3 right-3">
+                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedIds.has(photo.id) ? 'bg-teal-500 border-teal-500 text-white' : 'bg-white/20 border-white/40'}`}>
+                        {selectedIds.has(photo.id) && <Check size={14} />}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
                     <p className="text-white text-[10px] font-medium truncate">{photo.file_name}</p>
                     <p className="text-white/60 text-[10px]">{formatBytes(photo.size_bytes)}</p>
                   </div>
