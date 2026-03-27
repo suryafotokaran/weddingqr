@@ -16,6 +16,8 @@ const plans = [
     name: 'Starter Plan',
     price: 149,
     amountPaise: 14900,
+    photosLimit: 500,
+    storageGb: 5,
     tagline: 'Perfect for small events & trials',
     features: [
       'Up to 500 Photos',
@@ -42,6 +44,8 @@ const plans = [
     badge: 'Most Popular',
     price: 199,
     amountPaise: 19900,
+    photosLimit: 1000,
+    storageGb: 10,
     tagline: 'Best for weddings & social events',
     features: [
       'Up to 1000 Photos',
@@ -60,6 +64,8 @@ const plans = [
     name: 'Elite Plan',
     price: 249,
     amountPaise: 24900,
+    photosLimit: 2000,
+    storageGb: 20,
     tagline: 'Ultimate coverage for large scale events',
     features: [
       'Up to 2000 Photos',
@@ -240,7 +246,11 @@ export default function Pricing() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ plan: plan.key, amountPaise: plan.amountPaise }),
+        body: JSON.stringify({
+          plan:        plan.key,
+          amountPaise: plan.amountPaise,
+          photosLimit: plan.photosLimit,
+        }),
       });
 
       const orderData = await res.json();
@@ -248,9 +258,9 @@ export default function Pricing() {
 
       // 3. Open Razorpay checkout
       await openRazorpayCheckout({
-        orderId: orderData.orderId,
-        amount: orderData.amount,
-        plan: plan.key,
+        orderId:  orderData.orderId,
+        amount:   orderData.amount,
+        plan:     plan.key,
         quantity: 1,
         user,
         onSuccess: async (response) => {
@@ -264,10 +274,10 @@ export default function Pricing() {
               },
               body: JSON.stringify({
                 razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_signature: response.razorpay_signature,
-                plan: plan.key,
-                amountPaise: plan.amountPaise,
+                razorpay_order_id:   response.razorpay_order_id,
+                razorpay_signature:  response.razorpay_signature,
+                plan:                plan.key,
+                amountPaise:         plan.amountPaise,
               }),
             });
 
@@ -276,10 +286,10 @@ export default function Pricing() {
 
             // 5. Store purchase info in sessionStorage and navigate
             sessionStorage.setItem('pendingPurchase', JSON.stringify({
-              purchaseId: verifyData.purchaseId,
-              plan: plan.key,
+              purchaseId:  verifyData.purchaseId,
+              plan:        plan.key,
               photosLimit: verifyData.photosLimit,
-              storageGb: verifyData.storageGb,
+              storageGb:   verifyData.storageGb,
             }));
 
             showToast('success', 'Payment Successful!', 'Redirecting to create your event…');

@@ -14,7 +14,6 @@ serve(async (req: Request) => {
   }
 
   try {
-    // Verify user is authenticated
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -35,7 +34,16 @@ serve(async (req: Request) => {
       });
     }
 
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = await req.json();
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      plan,
+      amountPaise,
+      customLabel,
+      eventId,
+      additionalPhotos,
+    } = await req.json();
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return new Response(JSON.stringify({ error: 'Missing payment fields' }), {
@@ -43,8 +51,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // ── Verify HMAC-SHA256 signature ──────────────────────────────────────────
-    // Razorpay signature = HMAC_SHA256(order_id + "|" + payment_id, key_secret)
+    // Verify HMAC-SHA256 signature
     const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')!;
     const body      = `${razorpay_order_id}|${razorpay_payment_id}`;
 
@@ -57,9 +64,7 @@ serve(async (req: Request) => {
     );
 
     const signatureBytes = await crypto.subtle.sign(
-      'HMAC',
-      key,
-      new TextEncoder().encode(body)
+      'HMAC', key, new TextEncoder().encode(body)
     );
 
     const computedHex = new TextDecoder().decode(
@@ -72,29 +77,49 @@ serve(async (req: Request) => {
       });
     }
 
-    // ── Mark purchase as paid ─────────────────────────────────────────────────
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { error: updateError } = await supabaseAdmin
+    // Mark purchase as paid and retrieve it
+    const { data: purchase, error: updateError } = await supabaseAdmin
       .from('purchases')
       .update({
         razorpay_payment_id,
         status: 'paid',
       })
       .eq('razorpay_order_id', razorpay_order_id)
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .select()
+      .single();
 
-    if (updateError) {
+    if (updateError || !purchase) {
       console.error('DB update error:', updateError);
       return new Response(JSON.stringify({ error: 'Failed to record payment' }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    return new Response(JSON.stringify({ success: true }), {
+    // If upgrade payment: bump the event's photos_limit
+    if (eventId && additionalPhotos) {
+      const { error: eventErr } = await supabaseAdmin.rpc('increment_event_photos_limit', {
+        p_event_id:   eventId,
+        p_additional: additionalPhotos,
+      });
+      if (eventErr) {
+        console.error('Event upgrade error:', eventErr);
+      }
+    }
+
+    return new Response(JSON.stringify({
+      success:     true,
+      purchaseId:  purchase.id,
+      plan:        purchase.plan,
+      photosLimit: purchase.photos_limit,
+      storageGb:   purchase.storage_gb,
+      customLabel: purchase.custom_label ?? null,
+    }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

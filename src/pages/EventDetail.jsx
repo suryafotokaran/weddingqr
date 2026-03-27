@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { uploadToB2 } from '../lib/backblaze';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
+import UpgradePlan from '../components/UpgradePlan';
 import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ImageIcon,
-  CalendarDays, Tag, Images, ArrowLeft, CloudUpload,
+  CalendarDays, Tag, Images, ArrowLeft, CloudUpload, ArrowUp,
 } from 'lucide-react';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
@@ -18,16 +20,12 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function formatGb(bytes) {
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
 function UploadItem({ item }) {
   const statusIcon = {
-    pending:    <Loader2 size={16} className="text-zinc-400 animate-spin" />,
-    uploading:  <Loader2 size={16} className="text-teal-500 animate-spin" />,
-    done:       <CheckCircle size={16} className="text-teal-600" />,
-    error:      <AlertCircle size={16} className="text-red-500" />,
+    pending:   <Loader2 size={16} className="text-zinc-400 animate-spin" />,
+    uploading: <Loader2 size={16} className="text-teal-500 animate-spin" />,
+    done:      <CheckCircle size={16} className="text-teal-600" />,
+    error:     <AlertCircle size={16} className="text-red-500" />,
   };
 
   return (
@@ -68,6 +66,7 @@ export default function EventDetail() {
   const [loading, setLoading]       = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast]           = useState(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const fileInputRef                = useRef(null);
 
   const showToast = (type, title, message) => {
@@ -95,29 +94,14 @@ export default function EventDetail() {
 
   useEffect(() => { fetchEvent(); }, [fetchEvent]);
 
-  // Signed URLs for photo grid
-  const [photoUrls, setPhotoUrls] = useState({});
-  useEffect(() => {
-    if (!photos.length) return;
-    (async () => {
-      const entries = await Promise.all(
-        photos.map(async (p) => {
-          const { data } = await supabase.storage
-            .from('event-photos')
-            .createSignedUrl(p.storage_path, 3600);
-          return [p.id, data?.signedUrl ?? null];
-        }),
-      );
-      setPhotoUrls(Object.fromEntries(entries));
-    })();
-  }, [photos]);
-
+  // ── Upload to BackBlaze B2 ─────────────────────────────────────────────────
   const uploadFiles = useCallback(async (files) => {
     if (!user || !event) return;
+
     const validFiles = [];
     for (const f of files) {
       if (f.size > MAX_FILE_SIZE) {
-        showToast('error', 'File too large', `"${f.name}" exceeds 50 MB limit.`);
+        showToast('error', 'File too large', `"${f.name}" exceeds the 50 MB limit.`);
         continue;
       }
       if (!f.type.startsWith('image/')) {
@@ -126,7 +110,8 @@ export default function EventDetail() {
       }
       const totalPhotos = photos.length + validFiles.length;
       if (totalPhotos >= event.photos_limit) {
-        showToast('error', 'Quota reached', `This event allows max ${event.photos_limit} photos.`);
+        showToast('error', 'Quota reached', `This event allows max ${event.photos_limit} photos. Upgrade to add more.`);
+        setShowUpgrade(true);
         break;
       }
       validFiles.push(f);
@@ -148,58 +133,60 @@ export default function EventDetail() {
     for (const item of newItems) {
       setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'uploading' } : u));
 
-      const ext       = item.file.name.split('.').pop();
-      const fileName  = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-      const storagePath = `${user.id}/${event.id}/${fileName}`;
+      try {
+        const ext        = item.file.name.split('.').pop();
+        const fileName   = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const storagePath = `${user.id}/${event.id}/${fileName}`;
 
-      const { error: storageErr } = await supabase.storage
-        .from('event-photos')
-        .upload(storagePath, item.file, { upsert: false });
-
-      if (storageErr) {
-        setUploading(prev =>
-          prev.map(u => u.id === item.id ? { ...u, status: 'error', error: storageErr.message } : u),
+        // Upload to BackBlaze B2 directly from browser (no edge function)
+        const { fileId, downloadUrl } = await uploadToB2(
+          item.file,
+          storagePath,
         );
-        continue;
-      }
 
-      const { error: dbErr } = await supabase.from('photos').insert({
-        event_id:     event.id,
-        user_id:      user.id,
-        storage_path: storagePath,
-        file_name:    item.file.name,
-        size_bytes:   item.file.size,
-      });
+        // Record in Supabase DB (metadata only, no file stored in Supabase)
+        const { error: dbErr } = await supabase.from('photos').insert({
+          event_id:        event.id,
+          user_id:         user.id,
+          storage_path:    storagePath,   // kept for reference
+          file_name:       item.file.name,
+          size_bytes:      item.file.size,
+          b2_file_id:      fileId,
+          b2_download_url: downloadUrl,
+        });
 
-      if (dbErr) {
+        if (dbErr) throw new Error(dbErr.message);
+
         setUploading(prev =>
-          prev.map(u => u.id === item.id ? { ...u, status: 'error', error: dbErr.message } : u),
+          prev.map(u => u.id === item.id ? { ...u, status: 'done', progress: 100 } : u),
         );
-        continue;
+      } catch (err) {
+        setUploading(prev =>
+          prev.map(u => u.id === item.id ? { ...u, status: 'error', error: err.message } : u),
+        );
       }
-
-      setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'done', progress: 100 } : u));
     }
 
-    // Refresh photo list
     await fetchEvent();
-    // Remove done items after a delay
     setTimeout(() => {
       setUploading(prev => prev.filter(u => u.status !== 'done'));
     }, 3000);
   }, [user, event, photos.length, fetchEvent]);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setIsDragging(false);
-    uploadFiles(Array.from(e.dataTransfer.files));
-  }, [uploadFiles]);
-
+  const handleDrop      = useCallback((e) => { e.preventDefault(); setIsDragging(false); uploadFiles(Array.from(e.dataTransfer.files)); }, [uploadFiles]);
   const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = ()    => setIsDragging(false);
-  const handleFilePick  = (e)   => uploadFiles(Array.from(e.target.files));
+  const handleDragLeave = ()  => setIsDragging(false);
+  const handleFilePick  = (e) => uploadFiles(Array.from(e.target.files));
 
-  const photoPercent = event ? Math.min(100, (photos.length / event.photos_limit) * 100) : 0;
+  const photoPercent    = event ? Math.min(100, (photos.length / event.photos_limit) * 100) : 0;
+  const quotaWarning    = photoPercent >= 90 && photoPercent < 100;
+  const quotaFull       = photoPercent >= 100;
+
+  const handleUpgraded = async (additionalPhotos) => {
+    showToast('success', 'Plan Upgraded!', `+${additionalPhotos} photos added to this event.`);
+    setShowUpgrade(false);
+    await fetchEvent();
+  };
 
   if (loading) {
     return (
@@ -246,7 +233,7 @@ export default function EventDetail() {
               </div>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-center flex-wrap">
               {/* Photo quota */}
               <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 min-w-[130px]">
                 <div className="flex items-center gap-1.5 mb-1">
@@ -255,23 +242,79 @@ export default function EventDetail() {
                 </div>
                 <p className="text-lg font-bold text-zinc-900">{photos.length} <span className="text-sm font-medium text-zinc-400">/ {event.photos_limit}</span></p>
                 <div className="mt-1.5 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-teal-500 rounded-full transition-all duration-500" style={{ width: `${photoPercent}%` }} />
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-teal-500'}`}
+                    style={{ width: `${photoPercent}%` }}
+                  />
                 </div>
               </div>
+
+              {/* Upgrade button */}
+              {!showUpgrade && (
+                <button
+                  onClick={() => setShowUpgrade(true)}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50 hover:bg-teal-100 hover:border-teal-400 transition-all"
+                >
+                  <ArrowUp size={13} /> Upgrade Plan
+                </button>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Quota warning / full banners */}
+        {quotaFull && !showUpgrade && (
+          <div className="flex items-center justify-between gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
+            <div>
+              <p className="text-sm font-bold text-red-700">📛 Photo quota reached</p>
+              <p className="text-xs text-red-500 mt-0.5">You've used all {event.photos_limit} photos. Upgrade to continue uploading.</p>
+            </div>
+            <button
+              onClick={() => setShowUpgrade(true)}
+              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold silk-gradient text-white shadow hover:opacity-90 active:scale-95 transition-all"
+            >
+              <ArrowUp size={12} /> Upgrade Now
+            </button>
+          </div>
+        )}
+
+        {quotaWarning && !quotaFull && !showUpgrade && (
+          <div className="flex items-center justify-between gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
+            <div>
+              <p className="text-sm font-bold text-amber-700">⚠️ Quota almost full</p>
+              <p className="text-xs text-amber-600 mt-0.5">{photos.length} of {event.photos_limit} photos used — consider upgrading soon.</p>
+            </div>
+            <button
+              onClick={() => setShowUpgrade(true)}
+              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
+            >
+              <ArrowUp size={12} /> Add More
+            </button>
+          </div>
+        )}
+
+        {/* Upgrade Panel */}
+        {showUpgrade && (
+          <UpgradePlan
+            event={event}
+            user={user}
+            onUpgraded={handleUpgraded}
+            onClose={() => setShowUpgrade(false)}
+          />
+        )}
 
         {/* Upload Zone */}
         <div
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 mb-6 ${
-            isDragging
-              ? 'border-teal-500 bg-teal-50 scale-[1.01]'
-              : 'border-zinc-200 bg-white hover:border-teal-400 hover:bg-teal-50/30'
+          onClick={() => !quotaFull && fileInputRef.current?.click()}
+          className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-200 mb-6 ${
+            quotaFull
+              ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60'
+              : isDragging
+              ? 'border-teal-500 bg-teal-50 scale-[1.01] cursor-pointer'
+              : 'border-zinc-200 bg-white hover:border-teal-400 hover:bg-teal-50/30 cursor-pointer'
           }`}
         >
           <div className="flex flex-col items-center gap-3">
@@ -280,18 +323,20 @@ export default function EventDetail() {
             </div>
             <div>
               <p className="text-base font-bold text-zinc-800">
-                {isDragging ? 'Drop photos here' : 'Drag & drop photos here'}
+                {quotaFull ? 'Quota reached — upgrade to upload more' : isDragging ? 'Drop photos here' : 'Drag & drop photos here'}
               </p>
               <p className="text-sm text-zinc-500 mt-1">or click to browse · Max 50 MB per photo · JPG, PNG, WEBP, HEIC</p>
             </div>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-              className="silk-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md hover:opacity-90 active:scale-95 transition-all"
-            >
-              <Upload size={14} className="inline mr-1.5" />
-              Select Photos
-            </button>
+            {!quotaFull && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                className="silk-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md hover:opacity-90 active:scale-95 transition-all"
+              >
+                <Upload size={14} className="inline mr-1.5" />
+                Select Photos
+              </button>
+            )}
           </div>
           <input
             ref={fileInputRef}
@@ -307,11 +352,8 @@ export default function EventDetail() {
         {uploading.length > 0 && (
           <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-zinc-900">Uploading</h3>
-              <button
-                onClick={() => setUploading([])}
-                className="text-zinc-400 hover:text-zinc-600 transition-colors"
-              >
+              <h3 className="font-bold text-zinc-900">Uploading to BackBlaze</h3>
+              <button onClick={() => setUploading([])} className="text-zinc-400 hover:text-zinc-600 transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -344,11 +386,12 @@ export default function EventDetail() {
                   key={photo.id}
                   className="group relative aspect-square rounded-xl overflow-hidden bg-zinc-100 shadow-sm hover:shadow-md transition-all duration-200"
                 >
-                  {photoUrls[photo.id] ? (
+                  {photo.b2_download_url ? (
                     <img
-                      src={photoUrls[photo.id]}
+                      src={photo.b2_download_url}
                       alt={photo.file_name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      loading="lazy"
                     />
                   ) : (
                     <div className="flex items-center justify-center w-full h-full">
