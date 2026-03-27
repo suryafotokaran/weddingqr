@@ -1,63 +1,78 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { openRazorpayCheckout } from '../lib/razorpay';
-import { Loader2, Zap, Star, Crown, Pencil, ArrowUp } from 'lucide-react';
+import { Loader2, Zap, Star, Crown, Check, ArrowUp } from 'lucide-react';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-// Predefined add-on tiers
-const ADD_ON_TIERS = [
-  { key: 'addon_starter', photos: 500,  price: 149, amountPaise: 14900, label: 'Starter Add-on',  icon: Zap,    iconColor: '#3d4947', bg: '#f3f3f4' },
-  { key: 'addon_pro',     photos: 1000, price: 249, amountPaise: 24900, label: 'Pro Add-on',      icon: Star,   iconColor: '#00685f', bg: '#d9fdf9' },
-  { key: 'addon_elite',   photos: 1500, price: 349, amountPaise: 34900, label: 'Elite Add-on',    icon: Crown,  iconColor: '#85513e', bg: '#ffdbcf' },
+const PLANS = [
+  {
+    key: 'basic',
+    icon: Zap,
+    name: 'Starter Plan',
+    price: 149,
+    amountPaise: 14900,
+    photosLimit: 500,
+    storageGb: 5,
+    iconBg: '#f3f3f4',
+    iconColor: '#3d4947',
+    tagline: 'Total 500 Photos',
+  },
+  {
+    key: 'pro',
+    icon: Star,
+    name: 'Professional Plan',
+    price: 199,
+    amountPaise: 19900,
+    photosLimit: 1000,
+    storageGb: 10,
+    iconBg: '#89f5e7',
+    iconColor: '#00685f',
+    tagline: 'Total 1000 Photos',
+  },
+  {
+    key: 'premium',
+    icon: Crown,
+    name: 'Elite Plan',
+    price: 249,
+    amountPaise: 24900,
+    photosLimit: 2000,
+    storageGb: 20,
+    iconBg: '#ffdbcf',
+    iconColor: '#85513e',
+    tagline: 'Total 2000 Photos',
+  },
 ];
 
-/**
- * Given a custom photo count, return the matching add-on tier.
- * Snaps upward to the nearest tier threshold.
- */
-function resolveCustomTier(count) {
-  if (count <= 500)  return ADD_ON_TIERS[0]; // ₹149
-  if (count <= 1000) return ADD_ON_TIERS[1]; // ₹249
-  return ADD_ON_TIERS[2];                    // ₹349 (1001–1500+)
-}
-
-/**
- * UpgradePlan — shown on EventDetail when quota is near/full.
- * Props:
- *   event       — current event object
- *   user        — current user
- *   onUpgraded  — callback(additionalPhotos) after successful upgrade
- *   onClose     — callback to dismiss this panel
- */
 export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
-  const [selected, setSelected]     = useState(null); // key of selected tier
-  const [customCount, setCustomCount] = useState('');  // custom photo count input
+  const [selected, setSelected]     = useState(null);
   const [loadingKey, setLoadingKey]  = useState(null);
   const [error, setError]            = useState(null);
 
-  // Resolve custom tier based on typed count
-  const customTier = customCount && parseInt(customCount, 10) > 0
-    ? resolveCustomTier(parseInt(customCount, 10))
-    : null;
+  // Determine current plan based on photos_limit or plan_name
+  const currentPlanKey = PLANS.find(p => 
+    p.photosLimit === event.photos_limit || 
+    p.key === event.plan_name
+  )?.key || 'basic';
 
-  const activeTier =
-    selected === 'custom'
-      ? (customTier ? { ...customTier, photos: parseInt(customCount, 10) } : null)
-      : ADD_ON_TIERS.find(t => t.key === selected) ?? null;
+  const currentPlan = PLANS.find(p => p.key === currentPlanKey);
+  const currentPlanIdx = PLANS.findIndex(p => p.key === currentPlanKey);
+  const isLastPlan     = currentPlanIdx === PLANS.length - 1;
+
+  const activePlan = PLANS.find(p => p.key === selected) ?? null;
+  const upgradePrice = activePlan && currentPlan ? activePlan.price - currentPlan.price : 0;
+  const upgradeAmountPaise = activePlan && currentPlan ? activePlan.amountPaise - currentPlan.amountPaise : 0;
 
   const handleUpgrade = async () => {
-    if (!activeTier || !user || !event) return;
+    if (!activePlan || !user || !event) return;
     setError(null);
-    setLoadingKey(selected ?? 'custom');
+    setLoadingKey(selected);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please sign in again.');
 
-      const planKey     = 'custom';
-      const customLabel = activeTier.label;
-      const additional  = activeTier.photos;
+      const planKey = activePlan.key;
 
       // Create Razorpay order
       const orderRes = await fetch(`${SUPABASE_URL}/functions/v1/create-razorpay-order`, {
@@ -68,9 +83,8 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
         },
         body: JSON.stringify({
           plan:        planKey,
-          amountPaise: activeTier.amountPaise,
-          photosLimit: additional,
-          customLabel,
+          amountPaise: upgradeAmountPaise, // Charge difference only
+          photosLimit: activePlan.photosLimit,
           eventId:     event.id,
         }),
       });
@@ -97,10 +111,8 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
               razorpay_order_id:   response.razorpay_order_id,
               razorpay_signature:  response.razorpay_signature,
               plan:                planKey,
-              amountPaise:         activeTier.amountPaise,
-              customLabel,
               eventId:             event.id,
-              additionalPhotos:    additional,
+              photosLimit:         activePlan.photosLimit,
             }),
           });
 
@@ -108,7 +120,7 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
           if (!verifyRes.ok) throw new Error(verifyData.error || 'Verification failed');
 
           setLoadingKey(null);
-          onUpgraded(additional);
+          onUpgraded(activePlan.photosLimit);
         },
         onFailure: (msg) => {
           if (msg !== 'Payment cancelled') setError(msg);
@@ -130,8 +142,8 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
             <ArrowUp size={18} className="text-white" />
           </div>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-teal-600">Add More Photos</p>
-            <h3 className="text-lg font-extrabold text-zinc-900">Upgrade Plan</h3>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-teal-600">Upgrade Required</p>
+            <h3 className="text-lg font-extrabold text-zinc-900">Choose Higher Plan</h3>
           </div>
         </div>
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 text-xs font-medium transition-colors">
@@ -139,80 +151,60 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
         </button>
       </div>
 
-      <p className="text-sm text-zinc-500 mb-5">
-        Current limit: <span className="font-bold text-zinc-700">{event.photos_limit} photos</span>. Choose an add-on to increase your quota.
+      <p className="text-sm text-zinc-500 mb-6">
+        Your event is currently on the <span className="font-bold text-zinc-700 capitalize">{currentPlanKey} Plan</span> ({event.photos_limit} photos). 
+        Upgrade to a higher tier to increase your quota and storage.
       </p>
 
-      {/* Tier cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-        {ADD_ON_TIERS.map(tier => {
-          const Icon = tier.icon;
-          const isActive = selected === tier.key;
+      {/* Plan cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+        {PLANS.map(plan => {
+          const Icon        = plan.icon;
+          const isCurrent   = plan.key === currentPlanKey;
+          const isLower     = PLANS.findIndex(p => p.key === plan.key) < currentPlanIdx;
+          const isDisabled  = isCurrent || isLower;
+          const isSelected  = selected === plan.key;
+          const priceDiff   = plan.price - (currentPlan?.price || 0);
+
           return (
             <button
-              key={tier.key}
-              onClick={() => { setSelected(tier.key); setCustomCount(''); }}
-              className={`flex flex-col items-start p-4 rounded-xl border-2 text-left transition-all duration-150 ${
-                isActive
+              key={plan.key}
+              disabled={isDisabled}
+              onClick={() => setSelected(plan.key)}
+              className={`flex flex-col items-start p-5 rounded-2xl border-2 text-left transition-all duration-200 ${
+                isSelected
                   ? 'border-teal-500 bg-teal-50 shadow-md scale-[1.02]'
-                  : 'border-zinc-200 bg-white hover:border-teal-300 hover:bg-teal-50/40'
+                  : isDisabled
+                    ? 'border-zinc-100 bg-zinc-50 opacity-60 cursor-not-allowed'
+                    : 'border-zinc-100 bg-white hover:border-teal-300 hover:bg-teal-50/20'
               }`}
             >
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: tier.bg }}>
-                  <Icon size={15} style={{ color: tier.iconColor }} />
+              <div className="flex items-center justify-between w-full mb-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ background: plan.iconBg }}>
+                  <Icon size={16} style={{ color: plan.iconColor }} />
                 </div>
-                <span className="text-xs font-bold text-zinc-600">{tier.label}</span>
+                {isCurrent && (
+                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-teal-100 text-teal-800 flex items-center gap-1 border border-teal-200 shadow-sm">
+                    <Check size={10} strokeWidth={3} /> Active
+                  </span>
+                )}
               </div>
-              <p className="text-2xl font-extrabold text-zinc-900">+{tier.photos.toLocaleString()}</p>
-              <p className="text-xs text-zinc-400 mt-0.5">photos</p>
-              <p className="text-base font-bold text-teal-700 mt-2">₹{tier.price}</p>
+              
+              <p className="text-xs font-bold text-zinc-500 uppercase tracking-tight">{plan.name}</p>
+              <p className="text-xl font-extrabold text-zinc-900 mt-0.5">₹{isCurrent || isLower ? plan.price : priceDiff}</p>
+              <div className="flex flex-col mt-2">
+                {!isDisabled ? (
+                  <p className="text-[11px] font-bold text-teal-600">
+                    +{plan.photosLimit - currentPlan.photosLimit} Photos
+                  </p>
+                ) : (
+                  <p className="text-[11px] font-bold text-zinc-500">{plan.photosLimit} Photos Total</p>
+                )}
+                {isCurrent && <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Plan Already Paid</p>}
+              </div>
             </button>
           );
         })}
-      </div>
-
-      {/* Custom input */}
-      <div
-        className={`flex flex-col sm:flex-row items-start sm:items-center gap-3 p-4 rounded-xl border-2 transition-all duration-150 ${
-          selected === 'custom'
-            ? 'border-teal-500 bg-teal-50'
-            : 'border-zinc-200 bg-zinc-50 hover:border-teal-300'
-        }`}
-      >
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
-            <Pencil size={13} className="text-amber-600" />
-          </div>
-          <span className="text-xs font-bold text-zinc-600">Custom Amount</span>
-        </div>
-
-        <input
-          type="number"
-          min="1"
-          max="1500"
-          placeholder="Type photo count…"
-          value={customCount}
-          onChange={(e) => {
-            setCustomCount(e.target.value);
-            setSelected('custom');
-          }}
-          onFocus={() => setSelected('custom')}
-          className="flex-1 px-3 py-2 rounded-lg border border-zinc-200 text-sm font-medium text-zinc-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white placeholder-zinc-300 transition-all w-full sm:w-auto"
-        />
-
-        {/* Auto-resolved tier preview */}
-        {selected === 'custom' && customTier && customCount && (
-          <div className="flex items-center gap-2 shrink-0">
-            <div
-              className="px-3 py-1.5 rounded-lg text-xs font-bold"
-              style={{ background: customTier.bg, color: customTier.iconColor }}
-            >
-              → {customTier.label}
-            </div>
-            <span className="text-base font-extrabold text-teal-700">₹{customTier.price}</span>
-          </div>
-        )}
       </div>
 
       {error && (
@@ -220,23 +212,25 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
       )}
 
       {/* Action button */}
-      <div className="mt-5 flex items-center justify-between">
+      <div className="mt-6 flex items-center justify-between pt-4 border-t border-zinc-50">
         <div className="text-xs text-zinc-400">
-          {activeTier
-            ? `After upgrade: ${event.photos_limit + activeTier.photos} total photos`
-            : 'Select an add-on above'}
+          {activePlan
+            ? `New limit: ${activePlan.photosLimit} photos`
+            : isLastPlan 
+              ? 'You are on our highest plan' 
+              : 'Select a plan to upgrade'}
         </div>
         <button
-          disabled={!activeTier || !!loadingKey}
+          disabled={!activePlan || !!loadingKey}
           onClick={handleUpgrade}
-          className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm silk-gradient text-white shadow-md hover:opacity-90 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-7 py-3 rounded-xl font-bold text-sm silk-gradient text-white shadow-md hover:opacity-90 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {loadingKey
-            ? <><Loader2 size={15} className="animate-spin" /> Processing…</>
-            : <><ArrowUp size={15} /> Upgrade · {activeTier ? `₹${activeTier.price}` : '—'}</>
+            ? <><Loader2 size={16} className="animate-spin" /> Processing…</>
+            : <><ArrowUp size={16} /> Upgrade to {activePlan?.name || '...'} · ₹{upgradePrice}</>
           }
         </button>
       </div>
     </div>
-  );
+);
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { uploadToB2 } from '../lib/backblaze';
+
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
@@ -94,7 +94,7 @@ export default function EventDetail() {
 
   useEffect(() => { fetchEvent(); }, [fetchEvent]);
 
-  // ── Upload to BackBlaze B2 ─────────────────────────────────────────────────
+  // ── Upload to Supabase Storage ────────────────────────────────────────────
   const uploadFiles = useCallback(async (files) => {
     if (!user || !event) return;
 
@@ -134,25 +134,32 @@ export default function EventDetail() {
       setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'uploading' } : u));
 
       try {
-        const ext        = item.file.name.split('.').pop();
-        const fileName   = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const ext         = item.file.name.split('.').pop();
+        const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
         const storagePath = `${user.id}/${event.id}/${fileName}`;
 
-        // Upload to BackBlaze B2 directly from browser (no edge function)
-        const { fileId, downloadUrl } = await uploadToB2(
-          item.file,
-          storagePath,
-        );
+        // Upload to Supabase Storage
+        const { error: uploadErr } = await supabase.storage
+          .from('photos')
+          .upload(storagePath, item.file, { contentType: item.file.type, upsert: false });
 
-        // Record in Supabase DB (metadata only, no file stored in Supabase)
+        if (uploadErr) throw new Error(uploadErr.message);
+
+        // Get the public URL
+        const { data: urlData } = supabase.storage
+          .from('photos')
+          .getPublicUrl(storagePath);
+
+        const publicUrl = urlData?.publicUrl;
+
+        // Record metadata in Supabase DB
         const { error: dbErr } = await supabase.from('photos').insert({
-          event_id:        event.id,
-          user_id:         user.id,
-          storage_path:    storagePath,   // kept for reference
-          file_name:       item.file.name,
-          size_bytes:      item.file.size,
-          b2_file_id:      fileId,
-          b2_download_url: downloadUrl,
+          event_id:     event.id,
+          user_id:      user.id,
+          storage_path: storagePath,
+          file_name:    item.file.name,
+          size_bytes:   item.file.size,
+          supabase_url: publicUrl,
         });
 
         if (dbErr) throw new Error(dbErr.message);
@@ -182,8 +189,8 @@ export default function EventDetail() {
   const quotaWarning    = photoPercent >= 90 && photoPercent < 100;
   const quotaFull       = photoPercent >= 100;
 
-  const handleUpgraded = async (additionalPhotos) => {
-    showToast('success', 'Plan Upgraded!', `+${additionalPhotos} photos added to this event.`);
+  const handleUpgraded = async (newLimit) => {
+    showToast('success', 'Plan Upgraded!', `Event upgraded to ${newLimit} photo capacity.`);
     setShowUpgrade(false);
     await fetchEvent();
   };
@@ -233,15 +240,18 @@ export default function EventDetail() {
               </div>
             </div>
 
-            <div className="flex gap-3 items-center flex-wrap">
+            <div className="flex gap-4 items-stretch">
               {/* Photo quota */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 min-w-[130px]">
-                <div className="flex items-center gap-1.5 mb-1">
+              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[140px] shadow-sm flex flex-col justify-center">
+                <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
                   <Images size={14} className="text-teal-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Photos</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Photos</p>
                 </div>
-                <p className="text-lg font-bold text-zinc-900">{photos.length} <span className="text-sm font-medium text-zinc-400">/ {event.photos_limit}</span></p>
-                <div className="mt-1.5 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                <div className="flex items-baseline gap-1">
+                  <p className="text-lg font-bold text-zinc-900">{photos.length}</p>
+                  <p className="text-[11px] font-semibold text-zinc-400">/ {event.photos_limit}</p>
+                </div>
+                <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-teal-500'}`}
                     style={{ width: `${photoPercent}%` }}
@@ -249,13 +259,14 @@ export default function EventDetail() {
                 </div>
               </div>
 
-              {/* Upgrade button */}
+              {/* Upgrade button - forced to same height via items-stretch */}
               {!showUpgrade && (
                 <button
                   onClick={() => setShowUpgrade(true)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50 hover:bg-teal-100 hover:border-teal-400 transition-all"
+                  className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50/40 hover:bg-teal-50 hover:border-teal-400 hover:shadow-md transition-all active:scale-95"
                 >
-                  <ArrowUp size={13} /> Upgrade Plan
+                  <ArrowUp size={14} className="mb-[-2px]" />
+                  <span>Upgrade Plan</span>
                 </button>
               )}
             </div>
@@ -352,7 +363,7 @@ export default function EventDetail() {
         {uploading.length > 0 && (
           <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-zinc-900">Uploading to BackBlaze</h3>
+              <h3 className="font-bold text-zinc-900">Uploading Photos</h3>
               <button onClick={() => setUploading([])} className="text-zinc-400 hover:text-zinc-600 transition-colors">
                 <X size={16} />
               </button>
@@ -386,9 +397,9 @@ export default function EventDetail() {
                   key={photo.id}
                   className="group relative aspect-square rounded-xl overflow-hidden bg-zinc-100 shadow-sm hover:shadow-md transition-all duration-200"
                 >
-                  {photo.b2_download_url ? (
+                  {photo.supabase_url ? (
                     <img
-                      src={photo.b2_download_url}
+                      src={photo.supabase_url}
                       alt={photo.file_name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       loading="lazy"
