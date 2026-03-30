@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import { Check, Zap, Star, Crown, Loader2 } from 'lucide-react';
@@ -9,84 +9,54 @@ import { openRazorpayCheckout } from '../lib/razorpay';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-const plans = [
-  {
-    key: 'basic',
-    icon: Zap,
-    name: 'Starter Plan',
-    price: 149,
-    amountPaise: 14900,
-    photosLimit: 500,
-    storageGb: 5,
-    tagline: 'Perfect for small events & trials',
-    features: [
-      'Up to 500 Photos',
-      'Max 50MB per Photo',
-      '30 Days Event Access',
-      'Original Image Download',
-    ],
+// UI metadata per plan key (colors/icons stay local; price/limits/tagline come from DB)
+const PLAN_UI = {
+  basic: {
+    key: 'basic', icon: Zap, popular: false,
+    iconBg: '#eeeeee', iconColor: '#3d4947',
+    checkBg: '#f3f3f4', checkColor: '#00685f',
+    highlightColor: '#6d7a77', highlightCheck: '#00685f',
+    btnBorder: '#bcc9c6', btnColor: '#00685f',
+    features: ['Original Image Download', '30 Days Event Access'],
     highlights: ['Great for Intimate Events', 'High-Res Downloads'],
-    quota: '500 photos',
-    popular: false,
-    iconBg: '#eeeeee',
-    iconColor: '#3d4947',
-    checkBg: '#f3f3f4',
-    checkColor: '#00685f',
-    highlightColor: '#6d7a77',
-    highlightCheck: '#00685f',
-    btnBorder: '#bcc9c6',
-    btnColor: '#00685f',
   },
-  {
-    key: 'pro',
-    icon: Star,
-    name: 'Professional Plan',
-    badge: 'Most Popular',
-    price: 199,
-    amountPaise: 19900,
-    photosLimit: 1000,
-    storageGb: 10,
-    tagline: 'Best for weddings & social events',
-    features: [
-      'Up to 1000 Photos',
-      'Max 50MB per Photo',
-      '30 Days Event Access',
-      'Original Image Download',
-      'Priority 24/7 Support',
-    ],
+  pro: {
+    key: 'pro', icon: Star, popular: true,
+    features: ['Original Image Download', '30 Days Event Access', 'Priority 24/7 Support'],
     highlights: ['Perfect for Full Weddings', 'Priority Assistance', 'Full Quality Assets'],
-    quota: '1000 photos',
-    popular: true,
   },
-  {
-    key: 'premium',
-    icon: Crown,
-    name: 'Elite Plan',
-    price: 249,
-    amountPaise: 24900,
-    photosLimit: 2000,
-    storageGb: 20,
-    tagline: 'Ultimate coverage for large scale events',
-    features: [
-      'Up to 2000 Photos',
-      'Max 50MB per Photo',
-      '30 Days Event Access',
-      'Original Image Download',
-      'Dedicated Event Manager',
-    ],
+  premium: {
+    key: 'premium', icon: Crown, popular: false,
+    iconBg: '#ffdbcf', iconColor: '#85513e',
+    checkBg: '#ffdbcf', checkColor: '#85513e',
+    highlightColor: '#85513e', highlightCheck: '#85513e',
+    btnBorder: '#fdbaa2', btnColor: '#85513e',
+    features: ['Original Image Download', '30 Days Event Access', 'Dedicated Event Manager'],
     highlights: ['Max Photo Capacity', 'VIP Management', 'Premium Experience'],
-    quota: '2000 photos',
-    popular: false,
-    iconBg: '#ffdbcf',
-    iconColor: '#85513e',
-    checkBg: '#ffdbcf',
-    checkColor: '#85513e',
-    highlightColor: '#85513e',
-    highlightCheck: '#85513e',
-    btnBorder: '#fdbaa2',
-    btnColor: '#85513e',
   },
-];
+};
+
+// Build merged plan objects from DB row + local UI meta
+function buildPlan(dbRow) {
+  const ui = PLAN_UI[dbRow.key] ?? PLAN_UI.basic;
+  return {
+    ...ui,
+    name:            dbRow.label,
+    price:           Math.round(dbRow.amount_paise / 100),
+    amountPaise:     dbRow.amount_paise,
+    photosLimit:     dbRow.photos_limit,
+    storageGb:       dbRow.storage_gb,
+    maxImageSizeMb:  dbRow.max_image_size_mb,
+    tagline:         dbRow.tagline,
+    quota:           `${dbRow.photos_limit.toLocaleString()} photos`,
+    features: [
+      `Up to ${dbRow.photos_limit.toLocaleString()} Photos`,
+      `Max ${dbRow.max_image_size_mb}MB per Photo`,
+      ...(ui.features ?? []),
+    ],
+  };
+}
+
 
 // ── Plan Card ────────────────────────────────────────────────────────────────
 function PlanCard({ plan, onBuy, loadingKey }) {
@@ -219,8 +189,19 @@ export default function Pricing() {
   const navigate = useNavigate();
   const [loadingKey, setLoadingKey] = useState(null);
   const [toast, setToast] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const [plansLoading, setPlansLoading] = useState(true);
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
+
+  // Fetch live plan configs from DB
+  useEffect(() => {
+    supabase.from('plan_configs').select('*').eq('is_active', true).order('amount_paise')
+      .then(({ data }) => {
+        setPlans((data ?? []).map(buildPlan));
+        setPlansLoading(false);
+      });
+  }, []);
 
   const showToast = (type, title, message) => {
     setToast({ type, title, message });
@@ -360,14 +341,20 @@ export default function Pricing() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch mt-10">
-          {plans.map(plan => (
-            <PlanCard
-              key={plan.key}
-              plan={plan}
-              onBuy={handleBuy}
-              loadingKey={loadingKey}
-            />
-          ))}
+          {plansLoading ? (
+            [1,2,3].map(i => (
+              <div key={i} className="rounded-2xl bg-zinc-100 animate-pulse h-96" />
+            ))
+          ) : (
+            plans.map(plan => (
+              <PlanCard
+                key={plan.key}
+                plan={plan}
+                onBuy={handleBuy}
+                loadingKey={loadingKey}
+              />
+            ))
+          )}
         </div>
 
         <p className="text-center text-xs mt-10" style={{ color: '#bcc9c6' }}>
