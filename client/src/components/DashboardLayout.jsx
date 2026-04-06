@@ -63,7 +63,7 @@ export default function DashboardLayout({ children }) {
         </div>
         <div className="flex items-center gap-6">
           <button
-            onClick={() => navigate('/pricing')}
+            onClick={() => navigate('/createevent')}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md active:scale-95 transition-all hover:opacity-90"
             style={{ background: 'linear-gradient(135deg, #00685f 0%, #008378 100%)', color: '#ffffff' }}
           >

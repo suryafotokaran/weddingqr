@@ -206,7 +206,7 @@ export default function Studio() {
             <p className="font-semibold text-zinc-500 mb-1">No events yet</p>
             <p className="text-sm mb-5">Create your first event to get started.</p>
             <button
-              onClick={() => navigate('/pricing')}
+              onClick={() => navigate('/createevent')}
               className="silk-gradient text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow hover:opacity-90 active:scale-95 transition-all"
             >
               Create Event

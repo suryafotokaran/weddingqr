@@ -75,7 +75,7 @@ export default function Events() {
             <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900">Events</h1>
           </div>
           <button
-            onClick={() => navigate('/pricing')}
+            onClick={() => navigate('/createevent')}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md active:scale-95 transition-all hover:opacity-90 silk-gradient text-white"
           >
             <Plus size={16} /> New Event
@@ -93,7 +93,7 @@ export default function Events() {
             <p className="text-lg font-bold text-zinc-600 mb-1">No events yet</p>
             <p className="text-sm mb-6">Create your first event by choosing a plan.</p>
             <button
-              onClick={() => navigate('/pricing')}
+              onClick={() => navigate('/createevent')}
               className="silk-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md hover:opacity-90 active:scale-95 transition-all"
             >
               <Plus size={14} className="inline mr-1.5" /> Create Event
