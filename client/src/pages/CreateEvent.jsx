@@ -5,7 +5,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import {
-  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper,
+  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper, HardDrive,
 } from 'lucide-react';
 
 const EVENT_CATEGORIES = [
@@ -56,13 +56,14 @@ export default function CreateEvent() {
     const { data, error } = await supabase
       .from('events')
       .insert({
-        user_id:      user.id,
-        name:         form.name.trim(),
-        type:         form.category,
-        date:         form.date,
-        purchase_id:  purchase.purchaseId,
-        photos_limit: purchase.photosLimit,
-        storage_gb:   purchase.storageGb,
+        user_id:         user.id,
+        name:            form.name.trim(),
+        type:            form.category,
+        date:            form.date,
+        purchase_id:     purchase.purchaseId,
+        photos_limit:    99999,
+        storage_gb:      purchase.storageGb,
+        max_image_size_mb: purchase.maxImageSizeMb ?? 50,
       })
       .select()
       .single();
@@ -119,9 +120,9 @@ export default function CreateEvent() {
             <p className="font-bold text-zinc-900 capitalize">{purchase.plan} Plan</p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Quota</p>
-            <p className="font-bold text-teal-700">
-              📸 {purchase.photosLimit.toLocaleString()} photos · {purchase.storageGb} GB
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Storage</p>
+            <p className="font-bold text-teal-700 flex items-center gap-1 justify-end">
+              <HardDrive size={13} /> {purchase.storageGb} GB · Max {purchase.maxImageSizeMb ?? 50} MB/photo
             </p>
           </div>
         </div>

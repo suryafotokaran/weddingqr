@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { uploadToIDrive, getSignedPhotoUrls, deleteFromIDrive, buildIDriveRefUrl } from '../lib/s3';
 
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
@@ -10,10 +11,10 @@ import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ImageIcon,
   CalendarDays, Tag, Images, ArrowLeft, CloudUpload, ArrowUp,
   Lock, Share2, Copy, Check, Trash2, Download, Square, CheckSquare,
-  Eye, EyeOff, Heart, MonitorOff
+  Eye, EyeOff, Heart, MonitorOff, HardDrive
 } from 'lucide-react';
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+// Per-file size limit defaults to 50 MB — overridden dynamically from event.max_image_size_mb
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -156,11 +157,25 @@ export default function EventDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
   const [activeTab, setActiveTab] = useState('all'); // 'all' or 'selected'
+  const [signedUrls, setSignedUrls] = useState({});  // { photoId → signed GET URL }
   const fileInputRef                = useRef(null);
 
   useEffect(() => {
     setSelectedIds(new Set());
   }, [activeTab]);
+
+  // Generate signed GET URLs for iDrive e2 photos whenever the photo list changes
+  useEffect(() => {
+    if (!photos.length) return;
+    getSignedPhotoUrls(photos).then(urls => {
+      if (Object.keys(urls).length) setSignedUrls(prev => ({ ...prev, ...urls }));
+    });
+  }, [photos]);
+
+  // Returns the best available URL for a photo (signed iDrive URL or Supabase fallback)
+  const getPhotoUrl = useCallback((photo) => {
+    return signedUrls[photo.id] || photo.supabase_url || null;
+  }, [signedUrls]);
 
   const showToast = (type, title, message) => {
     setToast({ type, title, message });
@@ -191,23 +206,28 @@ export default function EventDetail() {
 
   useEffect(() => { fetchEvent(true); }, [fetchEvent]);
 
-  // ── Upload to Supabase Storage ────────────────────────────────────────────
+  // ── Upload to iDrive e2 Storage (S3-compatible) ───────────────────────────
   const uploadFiles = useCallback(async (files) => {
     if (!user || !event) return;
 
+    const maxFileSizeMb = event.max_image_size_mb || 50;
+    const maxFileSize   = maxFileSizeMb * 1024 * 1024;
+
     const validFiles = [];
     for (const f of files) {
-      if (f.size > MAX_FILE_SIZE) {
-        showToast('error', 'File too large', `"${f.name}" exceeds the 50 MB limit.`);
+      if (f.size > maxFileSize) {
+        showToast('error', 'File too large', `"${f.name}" exceeds the ${maxFileSizeMb} MB per-photo limit.`);
         continue;
       }
       if (!f.type.startsWith('image/')) {
         showToast('error', 'Invalid file', `"${f.name}" is not an image.`);
         continue;
       }
-      const totalPhotos = photos.length + validFiles.length;
-      if (totalPhotos >= event.photos_limit) {
-        showToast('error', 'Quota reached', `This event allows max ${event.photos_limit} photos. Upgrade to add more.`);
+      const storageUsed  = photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+      const pendingBytes  = validFiles.reduce((acc, f) => acc + f.size, 0);
+      const storageLimit  = event.storage_gb * 1024 * 1024 * 1024;
+      if (storageUsed + pendingBytes + f.size > storageLimit) {
+        showToast('error', 'Storage limit reached', `Adding "${f.name}" would exceed your ${event.storage_gb} GB storage limit.`);
         setShowUpgrade(true);
         break;
       }
@@ -235,19 +255,11 @@ export default function EventDetail() {
         const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
         const storagePath = `${user.id}/${event.id}/${fileName}`;
 
-        // Upload to Supabase Storage
-        const { error: uploadErr } = await supabase.storage
-          .from('photos')
-          .upload(storagePath, item.file, { contentType: item.file.type, upsert: false });
+        // ── Upload to iDrive e2 via presigned PUT URL ──
+        await uploadToIDrive(item.file, storagePath);
 
-        if (uploadErr) throw new Error(uploadErr.message);
-
-        // Get the public URL
-        const { data: urlData } = supabase.storage
-          .from('photos')
-          .getPublicUrl(storagePath);
-
-        const publicUrl = urlData?.publicUrl;
+        // Build a non-signed reference URL for the DB record
+        const refUrl = buildIDriveRefUrl(storagePath);
 
         // Record metadata in Supabase DB
         const { error: dbErr } = await supabase.from('photos').insert({
@@ -256,7 +268,7 @@ export default function EventDetail() {
           storage_path: storagePath,
           file_name:    item.file.name,
           size_bytes:   item.file.size,
-          supabase_url: publicUrl,
+          supabase_url: refUrl, // stores iDrive ref URL (signed URL generated on load)
         });
 
         if (dbErr) throw new Error(dbErr.message);
@@ -282,12 +294,14 @@ export default function EventDetail() {
   const handleDragLeave = ()  => setIsDragging(false);
   const handleFilePick  = (e) => uploadFiles(Array.from(e.target.files));
 
-  const photoPercent    = event ? Math.min(100, (photos.length / event.photos_limit) * 100) : 0;
-  const quotaWarning    = photoPercent >= 90 && photoPercent < 100;
-  const quotaFull       = photoPercent >= 100;
+  const storageUsedBytes  = photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+  const storageLimitBytes  = event ? event.storage_gb * 1024 * 1024 * 1024 : 1;
+  const storagePercent     = event ? Math.min(100, (storageUsedBytes / storageLimitBytes) * 100) : 0;
+  const quotaWarning       = storagePercent >= 90 && storagePercent < 100;
+  const quotaFull          = storagePercent >= 100;
 
-  const handleUpgraded = async (newLimit) => {
-    showToast('success', 'Plan Upgraded!', `Event upgraded to ${newLimit} photo capacity.`);
+  const handleUpgraded = async (newStorageGb) => {
+    showToast('success', 'Plan Upgraded!', `Storage upgraded to ${newStorageGb} GB.`);
     setShowUpgrade(false);
     await fetchEvent();
   };
@@ -355,20 +369,34 @@ export default function EventDetail() {
       const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
       const storagePaths = selectedPhotos.map(p => p.storage_path);
 
-      // 1. Delete from Supabase Storage
-      const { error: storageErr } = await supabase.storage
-        .from('photos')
-        .remove(storagePaths);
+      // 1. Delete from iDrive e2 (only iDrive photos; old Supabase photos skip cleanly)
+      const idrivePaths = selectedPhotos
+        .filter(p => !p.supabase_url?.includes('supabase.co'))
+        .map(p => p.storage_path);
+      if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
 
-      if (storageErr) throw storageErr;
+      // 2. Delete old Supabase Storage photos (if any still selected)
+      const supaPaths = selectedPhotos
+        .filter(p => p.supabase_url?.includes('supabase.co'))
+        .map(p => p.storage_path);
+      if (supaPaths.length) {
+        await supabase.storage.from('photos').remove(supaPaths);
+      }
 
-      // 2. Delete from Database
+      // 3. Delete from Database
       const { error: dbErr } = await supabase
         .from('photos')
         .delete()
         .in('id', Array.from(selectedIds));
 
       if (dbErr) throw dbErr;
+
+      // Clear signed URL cache for deleted photos
+      setSignedUrls(prev => {
+        const next = { ...prev };
+        Array.from(selectedIds).forEach(id => delete next[id]);
+        return next;
+      });
 
       showToast('success', 'Deleted', `${selectedIds.size} photos removed successfully.`);
       setSelectedIds(new Set());
@@ -387,7 +415,10 @@ export default function EventDetail() {
     
     for (const photo of selectedPhotos) {
       try {
-        const response = await fetch(photo.supabase_url);
+        // Use signed URL for iDrive photos, supabase_url for legacy photos
+        const fetchUrl = getPhotoUrl(photo);
+        if (!fetchUrl) continue;
+        const response = await fetch(fetchUrl);
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -494,20 +525,20 @@ export default function EventDetail() {
             </div>
 
             <div className="flex gap-4 items-stretch">
-              {/* Photo quota */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[140px] shadow-sm flex flex-col justify-center">
+              {/* Storage quota */}
+              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
                 <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
-                  <Images size={14} className="text-teal-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest">Photos</p>
+                  <HardDrive size={14} className="text-teal-600" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Storage</p>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <p className="text-lg font-bold text-zinc-900">{photos.length}</p>
-                  <p className="text-[11px] font-semibold text-zinc-400">/ {event.photos_limit}</p>
+                  <p className="text-lg font-bold text-zinc-900">{formatBytes(storageUsedBytes)}</p>
+                  <p className="text-[11px] font-semibold text-zinc-400">/ {event.storage_gb} GB</p>
                 </div>
                 <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-teal-500'}`}
-                    style={{ width: `${photoPercent}%` }}
+                    style={{ width: `${storagePercent}%` }}
                   />
                 </div>
               </div>
@@ -530,8 +561,8 @@ export default function EventDetail() {
         {quotaFull && !showUpgrade && (
           <div className="flex items-center justify-between gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
             <div>
-              <p className="text-sm font-bold text-red-700">📛 Photo quota reached</p>
-              <p className="text-xs text-red-500 mt-0.5">You've used all {event.photos_limit} photos. Upgrade to continue uploading.</p>
+              <p className="text-sm font-bold text-red-700">📛 Storage limit reached</p>
+              <p className="text-xs text-red-500 mt-0.5">You've used all {event.storage_gb} GB. Upgrade to continue uploading.</p>
             </div>
             <button
               onClick={() => setShowUpgrade(true)}
@@ -545,8 +576,8 @@ export default function EventDetail() {
         {quotaWarning && !quotaFull && !showUpgrade && (
           <div className="flex items-center justify-between gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
             <div>
-              <p className="text-sm font-bold text-amber-700">⚠️ Quota almost full</p>
-              <p className="text-xs text-amber-600 mt-0.5">{photos.length} of {event.photos_limit} photos used — consider upgrading soon.</p>
+              <p className="text-sm font-bold text-amber-700">⚠️ Storage almost full</p>
+              <p className="text-xs text-amber-600 mt-0.5">{formatBytes(storageUsedBytes)} of {event.storage_gb} GB used — consider upgrading soon.</p>
             </div>
             <button
               onClick={() => setShowUpgrade(true)}
@@ -821,9 +852,9 @@ export default function EventDetail() {
                   key={photo.id}
                   className={`group relative aspect-square rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${selectedIds.has(photo.id) ? 'ring-4 ring-teal-500/20' : 'bg-zinc-100'}`}
                 >
-                  {photo.supabase_url ? (
+                  {getPhotoUrl(photo) ? (
                     <img
-                      src={photo.supabase_url}
+                      src={getPhotoUrl(photo)}
                       alt={photo.file_name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       loading="lazy"

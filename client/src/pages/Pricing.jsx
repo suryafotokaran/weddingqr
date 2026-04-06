@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
-import { Check, Zap, Star, Crown, Loader2 } from 'lucide-react';
+import { Check, Zap, Star, Crown, Loader2, HardDrive } from 'lucide-react';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { supabase } from '../lib/supabase';
 import Toast from '../components/Toast';
@@ -32,7 +32,7 @@ const PLAN_UI = {
     highlightColor: '#85513e', highlightCheck: '#85513e',
     btnBorder: '#fdbaa2', btnColor: '#85513e',
     features: ['Original Image Download', '30 Days Event Access', 'Dedicated Event Manager'],
-    highlights: ['Max Photo Capacity', 'VIP Management', 'Premium Experience'],
+    highlights: ['Maximum Storage Capacity', 'VIP Management', 'Premium Experience'],
   },
 };
 
@@ -44,14 +44,13 @@ function buildPlan(dbRow) {
     name:            dbRow.label,
     price:           Math.round(dbRow.amount_paise / 100),
     amountPaise:     dbRow.amount_paise,
-    photosLimit:     dbRow.photos_limit,
     storageGb:       dbRow.storage_gb,
     maxImageSizeMb:  dbRow.max_image_size_mb,
     tagline:         dbRow.tagline,
-    quota:           `${dbRow.photos_limit.toLocaleString()} photos`,
+    quota:           `${dbRow.storage_gb} GB`,
     features: [
-      `Up to ${dbRow.photos_limit.toLocaleString()} Photos`,
-      `Max ${dbRow.max_image_size_mb}MB per Photo`,
+      `${dbRow.storage_gb} GB Cloud Storage`,
+      `Max ${dbRow.max_image_size_mb} MB per Photo`,
       ...(ui.features ?? []),
     ],
   };
@@ -99,7 +98,7 @@ function PlanCard({ plan, onBuy, loadingKey }) {
             <span className="text-sm text-green-200">/ event</span>
           </div>
 
-          <p className="text-xs font-semibold mb-1" style={{ color: '#89f5e7' }}>📸 {plan.quota}</p>
+          <p className="text-xs font-semibold mb-1 flex items-center gap-1" style={{ color: '#89f5e7' }}><HardDrive size={12} /> {plan.quota}</p>
           <p className="text-sm mb-5" style={{ color: '#6bd8cb' }}>{plan.tagline}</p>
           <div className="h-px mb-5" style={{ background: 'rgba(255,255,255,0.2)' }} />
 
@@ -150,7 +149,7 @@ function PlanCard({ plan, onBuy, loadingKey }) {
           <span className="text-sm" style={{ color: '#6d7a77' }}>/ event</span>
         </div>
 
-        <p className="text-xs font-semibold mb-1" style={{ color: plan.highlightColor }}>📸 {plan.quota}</p>
+        <p className="text-xs font-semibold mb-1 flex items-center gap-1" style={{ color: plan.highlightColor }}><HardDrive size={12} /> {plan.quota}</p>
         <p className="text-sm mb-5" style={{ color: '#6d7a77' }}>{plan.tagline}</p>
         <div className="h-px mb-5" style={{ background: '#e2e2e2' }} />
 
@@ -230,7 +229,7 @@ export default function Pricing() {
         body: JSON.stringify({
           plan:        plan.key,
           amountPaise: plan.amountPaise,
-          photosLimit: plan.photosLimit,
+          storageGb:   plan.storageGb,
         }),
       });
 
@@ -267,10 +266,10 @@ export default function Pricing() {
 
             // 5. Store purchase info in sessionStorage and navigate
             sessionStorage.setItem('pendingPurchase', JSON.stringify({
-              purchaseId:  verifyData.purchaseId,
-              plan:        plan.key,
-              photosLimit: verifyData.photosLimit,
-              storageGb:   verifyData.storageGb,
+              purchaseId:     verifyData.purchaseId,
+              plan:           plan.key,
+              storageGb:      plan.storageGb,
+              maxImageSizeMb: plan.maxImageSizeMb,
             }));
 
             showToast('success', 'Payment Successful!', 'Redirecting to create your event…');
@@ -309,7 +308,7 @@ export default function Pricing() {
             Choose Your Event Plan
           </h1>
           <p className="max-w-xl mx-auto text-sm leading-relaxed" style={{ color: '#6d7a77' }}>
-            Each plan unlocks one event slot with a dedicated photo quota. Pay once, create your event instantly.
+            Each plan unlocks one event slot with a dedicated cloud storage quota. Pay once, create your event instantly.
           </p>
         </div>
 

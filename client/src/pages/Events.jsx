@@ -4,9 +4,17 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  CalendarDays, Images, Plus,
+  CalendarDays, HardDrive, Plus,
   ChevronRight, Loader2, FolderOpen,
 } from 'lucide-react';
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 function formatDate(d) {
   if (!d) return '—';
@@ -39,19 +47,19 @@ export default function Events() {
     })();
   }, [user]);
 
-  const [photoCounts, setPhotoCounts] = useState({});
+  const [storageUsed, setStorageUsed] = useState({});  // { eventId: bytes }
   useEffect(() => {
     if (!user || !events.length) return;
     (async () => {
       const { data } = await supabase
         .from('photos')
-        .select('event_id')
+        .select('event_id, size_bytes')
         .in('event_id', events.map(e => e.id));
-      const counts = {};
+      const usage = {};
       for (const p of data ?? []) {
-        counts[p.event_id] = (counts[p.event_id] ?? 0) + 1;
+        usage[p.event_id] = (usage[p.event_id] ?? 0) + (p.size_bytes || 0);
       }
-      setPhotoCounts(counts);
+      setStorageUsed(usage);
     })();
   }, [user, events]);
 
@@ -136,8 +144,8 @@ export default function Events() {
                     {formatDate(event.date)}
                   </div>
                   <span className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full">
-                    <Images size={11} />
-                    {photoCounts[event.id] ?? 0} / {event.photos_limit} photos
+                    <HardDrive size={11} />
+                    {formatBytes(storageUsed[event.id] ?? 0)} / {event.storage_gb} GB
                   </span>
                 </div>
               </div>

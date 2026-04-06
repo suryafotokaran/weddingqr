@@ -4,12 +4,20 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  Images,
+  HardDrive,
   CalendarDays,
   Tag,
   ChevronRight,
   FolderOpen,
 } from 'lucide-react';
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -30,10 +38,10 @@ export default function Studio() {
   const { data: userData } = useCurrentUser();
   const fullName  = userData?.fullName  ?? 'Photographer';
 
-  const [events,      setEvents]      = useState([]);
-  const [totalPhotos, setTotalPhotos] = useState(0);
-  const [photoCounts, setPhotoCounts] = useState({}); // { eventId: count }
-  const [loading,     setLoading]     = useState(true);
+  const [events,       setEvents]       = useState([]);
+  const [totalStorage, setTotalStorage] = useState(0); // bytes
+  const [storageUsed,  setStorageUsed]  = useState({}); // { eventId: bytes }
+  const [loading,      setLoading]      = useState(true);
 
   useEffect(() => {
     const user = userData?.user;
@@ -52,19 +60,19 @@ export default function Studio() {
       const eventList = evs ?? [];
       setEvents(eventList);
 
-      // Fetch photo counts per event + total
+      // Fetch storage used per event
       if (eventList.length > 0) {
         const { data: ph } = await supabase
           .from('photos')
-          .select('event_id')
+          .select('event_id, size_bytes')
           .in('event_id', eventList.map(e => e.id));
 
-        const counts = {};
+        const usage = {};
         for (const p of ph ?? []) {
-          counts[p.event_id] = (counts[p.event_id] ?? 0) + 1;
+          usage[p.event_id] = (usage[p.event_id] ?? 0) + (p.size_bytes || 0);
         }
-        setPhotoCounts(counts);
-        setTotalPhotos(Object.values(counts).reduce((a, b) => a + b, 0));
+        setStorageUsed(usage);
+        setTotalStorage(Object.values(usage).reduce((a, b) => a + b, 0));
       }
 
       setLoading(false);
@@ -100,17 +108,17 @@ export default function Studio() {
           </button>
         </div>
 
-        {/* Total Photos Uploaded */}
+        {/* Total Storage Used */}
         <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300">
           <div>
-            <Images size={24} className="text-amber-700 mb-4" />
-            <h4 className="text-sm font-medium text-zinc-500">Total Photos Uploaded</h4>
+            <HardDrive size={24} className="text-amber-700 mb-4" />
+            <h4 className="text-sm font-medium text-zinc-500">Total Storage Used</h4>
             <p className="text-4xl font-extrabold mt-2 text-zinc-900">
-              {loading ? '—' : totalPhotos.toLocaleString()}
+              {loading ? '—' : formatBytes(totalStorage)}
             </p>
           </div>
           <div className="mt-6 flex items-center gap-2 text-xs font-bold text-amber-700 bg-orange-50 w-fit px-3 py-1.5 rounded-lg">
-            <Images size={12} />
+            <HardDrive size={12} />
             ACROSS ALL EVENTS
           </div>
         </div>
@@ -150,7 +158,6 @@ export default function Studio() {
           <div className="space-y-2">
             {events.slice(0, 6).map(event => {
                 const plan      = event.purchases?.plan ?? null;
-                const photoCount = photoCounts[event.id] ?? 0;
 
                 const planStyle = {
                   basic:   { bg: '#f3f3f4', color: '#3d4947', label: 'Starter'      },
@@ -180,9 +187,9 @@ export default function Studio() {
 
                     {/* Right side tags */}
                     <div className="flex items-center gap-2 shrink-0">
-                      {/* Photo count */}
+                      {/* Storage used badge */}
                       <span className="text-[11px] font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full">
-                        {photoCount} / {event.photos_limit} photos
+                        {formatBytes(storageUsed[event.id] ?? 0)} / {event.storage_gb} GB
                       </span>
                       {/* Plan tag */}
                       {plan && (

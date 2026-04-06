@@ -67,8 +67,7 @@ function PlanCard({ plan, onSave }) {
       <div className="space-y-4">
         <Field label="Price (₹)" prefix="₹" value={Math.round(form.amount_paise / 100)}
           onChange={v => set('amount_paise')(v * 100)} min={0} />
-        <Field label="Photos Limit" suffix="photos" value={form.photos_limit} onChange={set('photos_limit')} min={1} />
-        <Field label="Storage" suffix="GB" value={form.storage_gb} onChange={set('storage_gb')} min={1} />
+        <Field label="Storage (GB)" suffix="GB" value={form.storage_gb} onChange={set('storage_gb')} min={1} />
         <Field label="Max Image Size" suffix="MB / image" value={form.max_image_size_mb} onChange={set('max_image_size_mb')} min={1} />
         <Field label="Tagline" type="text" value={form.tagline} onChange={set('tagline')} />
       </div>
@@ -228,7 +227,7 @@ function GrantFreeEvent({ users }) {
   const [form, setForm] = useState({
     user_id: '', event_name: '', event_type: 'Wedding',
     event_date: new Date().toISOString().split('T')[0],
-    photos_limit: 200, storage_gb: 2, max_image_size_mb: 20,
+    photos_limit: 99999, storage_gb: 25, max_image_size_mb: 50,
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null); // { success, message }

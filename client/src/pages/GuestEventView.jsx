@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { getSignedPhotoUrls } from '../lib/s3';
 import { Loader2, Lock, Image as ImageIcon, Heart, ShieldAlert, Download, Eye, EyeOff } from 'lucide-react';
 
 function SkeletonBlock({ className = "" }) {
@@ -63,6 +64,7 @@ export default function GuestEventView() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState('all'); // 'all' or 'favorites'
+  const [signedUrls, setSignedUrls] = useState({});  // { photoId → signedUrl }
   const [guestId, setGuestId] = useState(() => {
     const saved = localStorage.getItem('guest_id');
     if (saved) return saved;
@@ -70,6 +72,9 @@ export default function GuestEventView() {
     localStorage.setItem('guest_id', newId);
     return newId;
   });
+
+  // Returns the best display URL for a photo
+  const getPhotoUrl = (photo) => signedUrls[photo.id] || photo.supabase_url || null;
 
   useEffect(() => {
     fetchEvent();
@@ -173,6 +178,10 @@ export default function GuestEventView() {
 
       if (error) throw error;
       setPhotos(data);
+
+      // Generate signed URLs for iDrive e2 photos
+      const urls = await getSignedPhotoUrls(data);
+      if (Object.keys(urls).length) setSignedUrls(urls);
     } catch (err) {
       console.error('Error fetching photos:', err);
     } finally {
@@ -235,7 +244,10 @@ export default function GuestEventView() {
     setIsDownloading(true);
     for (const photo of favPhotos) {
       try {
-        const response = await fetch(photo.supabase_url);
+        // Use signed URL for iDrive photos, supabase_url for legacy photos
+        const fetchUrl = getPhotoUrl(photo);
+        if (!fetchUrl) continue;
+        const response = await fetch(fetchUrl);
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -401,12 +413,18 @@ export default function GuestEventView() {
               .filter(photo => activeTab === 'all' || favorites.has(photo.id))
               .map(photo => (
               <div key={photo.id} className={`group relative aspect-square rounded-2xl overflow-hidden transition-all duration-300 ${favorites.has(photo.id) ? 'scale-[1.02] ring-4 ring-pink-500/20 shadow-lg shadow-pink-500/10' : 'bg-zinc-200 shadow-sm hover:scale-[1.02]'}`}>
-                <img 
-                  src={photo.supabase_url} 
-                  alt={photo.file_name}
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                />
+                {getPhotoUrl(photo) ? (
+                  <img 
+                    src={getPhotoUrl(photo)} 
+                    alt={photo.file_name}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center w-full h-full">
+                    <Loader2 size={20} className="animate-spin text-zinc-300" />
+                  </div>
+                )}
                 <div 
                   onClick={() => toggleFavorite(photo.id)}
                   className={`absolute inset-0 transition-all duration-300 cursor-pointer ${favorites.has(photo.id) ? 'bg-pink-500/10 opacity-100' : 'bg-black/20 opacity-0 group-hover:opacity-100'}`}

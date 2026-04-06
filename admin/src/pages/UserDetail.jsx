@@ -15,7 +15,7 @@ import {
   Clock,
   XCircle,
   Download,
-  Camera,
+  HardDrive,
 } from 'lucide-react';
 
 const PLAN_STYLE = {
@@ -161,7 +161,7 @@ export default function UserDetail() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                     <span className="text-[11px] font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full flex items-center gap-1">
-                      <Camera size={11} /> {ev.photos_limit} limit
+                      <HardDrive size={11} /> {ev.storage_gb} GB storage
                     </span>
                     {ev.password ? (
                       <span className="text-[11px] font-semibold text-zinc-600 bg-zinc-100 px-2.5 py-1 rounded-full flex items-center gap-1"><Lock size={11} /> Password set</span>
