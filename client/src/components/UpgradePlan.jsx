@@ -1,73 +1,76 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { openRazorpayCheckout } from '../lib/razorpay';
 import { Loader2, Zap, Star, Crown, Check, ArrowUp, HardDrive } from 'lucide-react';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-const PLANS = [
-  {
-    key: 'basic',
-    icon: Zap,
-    name: 'Starter Plan',
-    price: 149,
-    amountPaise: 14900,
-    storageGb: 25,
-    iconBg: '#f3f3f4',
-    iconColor: '#3d4947',
-    tagline: '25 GB Storage',
-  },
-  {
-    key: 'pro',
-    icon: Star,
-    name: 'Professional Plan',
-    price: 199,
-    amountPaise: 19900,
-    storageGb: 40,
-    iconBg: '#89f5e7',
-    iconColor: '#00685f',
-    tagline: '40 GB Storage',
-  },
-  {
-    key: 'premium',
-    icon: Crown,
-    name: 'Elite Plan',
-    price: 249,
-    amountPaise: 24900,
-    storageGb: 75,
-    iconBg: '#ffdbcf',
-    iconColor: '#85513e',
-    tagline: '75 GB Storage',
-  },
-];
+const PLAN_META = {
+  basic: { icon: Zap, iconBg: '#f3f3f4', iconColor: '#3d4947' },
+  pro: { icon: Star, iconBg: '#89f5e7', iconColor: '#00685f' },
+  premium: { icon: Crown, iconBg: '#ffdbcf', iconColor: '#85513e' },
+};
 
-const PRICE_PER_GB = 5; // ₹5 per extra GB
+// Ordering for plan hierarchy
+const PLAN_ORDER = ['basic', 'pro', 'premium'];
 
 export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
-  const [selected, setSelected]     = useState(null);
-  const [loadingKey, setLoadingKey]  = useState(null);
-  const [error, setError]            = useState(null);
-  const [customGb, setCustomGb]      = useState(10); // minimum 10 GB add-on
+  const [plans, setPlans] = useState([]);
+  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [loadingKey, setLoadingKey] = useState(null);
+  const [error, setError] = useState(null);
+  const [customGb, setCustomGb] = useState(10); // minimum 10 GB add-on
 
-  // Determine current plan based on storage_gb
-  const currentPlanKey = PLANS.find(p =>
-    p.storageGb === event.storage_gb || p.key === event.plan_name
-  )?.key || (event.storage_gb >= 75 ? 'premium' : event.storage_gb >= 40 ? 'pro' : 'basic');
+  // Fetch active plan configs from DB
+  useEffect(() => {
+    supabase
+      .from('plan_configs')
+      .select('*')
+      .eq('is_active', true)
+      .then(({ data }) => {
+        if (data) {
+          // Sort by plan order
+          const sorted = [...data].sort(
+            (a, b) => PLAN_ORDER.indexOf(a.key) - PLAN_ORDER.indexOf(b.key)
+          );
+          setPlans(sorted);
+        }
+        setLoadingPlans(false);
+      });
+  }, []);
 
-  const currentPlan    = PLANS.find(p => p.key === currentPlanKey);
-  const currentPlanIdx = PLANS.findIndex(p => p.key === currentPlanKey);
-  const isLastPlan     = currentPlanKey === 'premium';
+  // Determine current plan based purely on storage_gb thresholds
+  const premiumPlan = plans.find(p => p.key === 'premium');
+  const proPlan     = plans.find(p => p.key === 'pro');
 
-  const activePlan = !isLastPlan ? (PLANS.find(p => p.key === selected) ?? null) : null;
+  const currentPlanKey = (
+    event.storage_gb >= (premiumPlan?.storage_gb ?? Infinity)
+      ? 'premium'
+      : event.storage_gb >= (proPlan?.storage_gb ?? Infinity)
+      ? 'pro'
+      : 'basic'
+  );
+
+  const currentPlan    = plans.find(p => p.key === currentPlanKey);
+  const currentPlanIdx = plans.findIndex(p => p.key === currentPlanKey);
+  // Only show "Add Extra Storage" if already at/above the premium plan's storage level
+  const isLastPlan = currentPlanKey === 'premium';
+
+  const activePlan = !isLastPlan ? (plans.find(p => p.key === selected) ?? null) : null;
+
+  // Per-GB add-on price from the premium plan config (or default ₹5/GB)
+  const extraGbPricePaise = premiumPlan?.extra_gb_price_paise ?? 500;
+  const extraGbPriceRs = extraGbPricePaise / 100;
 
   // Final target storage & price
   const targetStorageGb = isLastPlan
     ? event.storage_gb + customGb
-    : (activePlan?.storageGb || event.storage_gb);
+    : (activePlan?.storage_gb || event.storage_gb);
 
   const upgradeAmountPaise = isLastPlan
-    ? (customGb * PRICE_PER_GB * 100)
-    : (activePlan && currentPlan ? (activePlan.amountPaise - currentPlan.amountPaise) : 0);
+    ? (customGb * extraGbPricePaise)
+    : (activePlan && currentPlan ? (activePlan.amount_paise - currentPlan.amount_paise) : 0);
 
   const upgradePrice = upgradeAmountPaise / 100;
 
@@ -86,14 +89,14 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
       const orderRes = await fetch(`${SUPABASE_URL}/functions/v1/create-razorpay-order`, {
         method: 'POST',
         headers: {
-          'Content-Type':  'application/json',
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          plan:        planKey,
+          plan: planKey,
           amountPaise: upgradeAmountPaise,
-          storageGb:   targetStorageGb,
-          eventId:     event.id,
+          storageGb: targetStorageGb,
+          eventId: event.id,
         }),
       });
 
@@ -101,25 +104,25 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
       if (!orderRes.ok) throw new Error(orderData.error || 'Failed to create order');
 
       await openRazorpayCheckout({
-        orderId:  orderData.orderId,
-        amount:   orderData.amount,
-        plan:     planKey,
+        orderId: orderData.orderId,
+        amount: orderData.amount,
+        plan: planKey,
         quantity: 1,
         user,
         onSuccess: async (response) => {
           const verifyRes = await fetch(`${SUPABASE_URL}/functions/v1/verify-razorpay-payment`, {
             method: 'POST',
             headers: {
-              'Content-Type':  'application/json',
+              'Content-Type': 'application/json',
               'Authorization': `Bearer ${session.access_token}`,
             },
             body: JSON.stringify({
               razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_order_id:   response.razorpay_order_id,
-              razorpay_signature:  response.razorpay_signature,
-              plan:                planKey,
-              eventId:             event.id,
-              storageGb:           targetStorageGb,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_signature: response.razorpay_signature,
+              plan: planKey,
+              eventId: event.id,
+              storageGb: targetStorageGb,
             }),
           });
 
@@ -139,6 +142,14 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
       setLoadingKey(null);
     }
   };
+
+  if (loadingPlans) {
+    return (
+      <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.08)] border border-teal-100 p-7 mb-6 flex items-center justify-center py-16">
+        <Loader2 className="animate-spin text-teal-600" size={28} />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.08)] border border-teal-100 p-7 mb-6">
@@ -212,37 +223,37 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
               <div className="text-center">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Add-on Price</p>
                 <p className="text-2xl font-black text-teal-700">₹{upgradePrice.toFixed(2)}</p>
-                <p className="text-[10px] text-teal-600 font-bold mt-1 uppercase tracking-tighter text-center">₹{PRICE_PER_GB}/GB</p>
+                <p className="text-[10px] text-teal-600 font-bold mt-1 uppercase tracking-tighter text-center">₹{extraGbPriceRs}/GB</p>
               </div>
             </div>
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          {PLANS.map(plan => {
-            const Icon       = plan.icon;
-            const isCurrent  = plan.key === currentPlanKey;
-            const isLower    = PLANS.findIndex(p => p.key === plan.key) < currentPlanIdx;
+          {plans.map(plan => {
+            const meta = PLAN_META[plan.key] ?? PLAN_META.basic;
+            const Icon = meta.icon;
+            const isCurrent = plan.key === currentPlanKey;
+            const isLower = plans.findIndex(p => p.key === plan.key) < currentPlanIdx;
             const isDisabled = isCurrent || isLower;
             const isSelected = selected === plan.key;
-            const priceDiff  = plan.price - (currentPlan?.price || 0);
+            const priceDiff = (plan.amount_paise - (currentPlan?.amount_paise || 0)) / 100;
 
             return (
               <button
                 key={plan.key}
                 disabled={isDisabled}
                 onClick={() => setSelected(plan.key)}
-                className={`flex flex-col items-start p-5 rounded-2xl border-2 text-left transition-all duration-200 ${
-                  isSelected
+                className={`flex flex-col items-start p-5 rounded-2xl border-2 text-left transition-all duration-200 ${isSelected
                     ? 'border-teal-500 bg-teal-50 shadow-md scale-[1.02]'
                     : isDisabled
                       ? 'border-zinc-100 bg-zinc-50 opacity-60 cursor-not-allowed'
                       : 'border-zinc-100 bg-white hover:border-teal-300 hover:bg-teal-50/20'
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between w-full mb-3">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: plan.iconBg }}>
-                    <Icon size={16} style={{ color: plan.iconColor }} />
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: meta.iconBg }}>
+                    <Icon size={16} style={{ color: meta.iconColor }} />
                   </div>
                   {isCurrent && (
                     <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-teal-100 text-teal-800 flex items-center gap-1 border border-teal-200 shadow-sm">
@@ -251,15 +262,17 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
                   )}
                 </div>
 
-                <p className="text-xs font-bold text-zinc-500 uppercase tracking-tight">{plan.name}</p>
-                <p className="text-xl font-extrabold text-zinc-900 mt-0.5">₹{isCurrent || isLower ? plan.price : priceDiff}</p>
+                <p className="text-xs font-bold text-zinc-500 uppercase tracking-tight">{plan.label}</p>
+                <p className="text-xl font-extrabold text-zinc-900 mt-0.5">
+                  ₹{isCurrent || isLower ? Math.round(plan.amount_paise / 100) : priceDiff}
+                </p>
                 <div className="flex flex-col mt-2">
                   {!isDisabled ? (
                     <p className="text-[11px] font-bold text-teal-600 flex items-center gap-1">
-                      <HardDrive size={10} /> +{plan.storageGb - currentPlan.storageGb} GB
+                      <HardDrive size={10} /> +{plan.storage_gb - event.storage_gb} GB
                     </p>
                   ) : (
-                    <p className="text-[11px] font-bold text-zinc-500">{plan.storageGb} GB total</p>
+                    <p className="text-[11px] font-bold text-zinc-500">{plan.storage_gb} GB total</p>
                   )}
                   {isCurrent && <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Current Plan</p>}
                 </div>
@@ -279,7 +292,7 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
           {isLastPlan
             ? `New total: ${targetStorageGb} GB storage`
             : activePlan
-              ? `New limit: ${activePlan.storageGb} GB storage`
+              ? `New limit: ${activePlan.storage_gb} GB storage`
               : 'Select a plan to upgrade'
           }
         </div>
@@ -295,7 +308,7 @@ export default function UpgradePlan({ event, user, onUpgraded, onClose }) {
                 <ArrowUp size={16} />
                 {isLastPlan
                   ? `Add ${customGb} GB · ₹${upgradePrice.toFixed(2)}`
-                  : `Upgrade to ${activePlan?.name || '...'} · ₹${upgradePrice.toFixed(2)}`}
+                  : `Upgrade to ${activePlan?.label || '...'} · ₹${upgradePrice.toFixed(2)}`}
               </>
             )
           }

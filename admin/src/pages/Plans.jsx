@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
   Zap, Star, Crown, Save, Loader2, CheckCircle2,
-  Gift, User, CalendarDays, Images, HardDrive, FileImage,
+  Gift, User, CalendarDays, HardDrive, FileImage,
   AlertCircle, Search,
 } from 'lucide-react';
 
@@ -16,9 +16,9 @@ const PLAN_META = {
 
 // Always show these 3 cards — DB data merges on top; zeros shown if DB is empty
 const PLAN_DEFAULTS = [
-  { key: 'basic',   label: 'Starter Plan',      amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, photos_limit: 0 },
-  { key: 'pro',     label: 'Professional Plan', amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, photos_limit: 0 },
-  { key: 'premium', label: 'Elite Plan',         amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, photos_limit: 0 },
+  { key: 'basic',   label: 'Starter Plan',      amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, extra_gb_price_paise: 500 },
+  { key: 'pro',     label: 'Professional Plan', amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, extra_gb_price_paise: 500 },
+  { key: 'premium', label: 'Elite Plan',         amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, extra_gb_price_paise: 500 },
 ];
 
 function Field({ label, value, onChange, prefix, suffix, type = 'number', min }) {
@@ -76,6 +76,10 @@ function PlanCard({ plan, onSave }) {
           onChange={v => set('amount_paise')(v * 100)} min={0} />
         <Field label="Storage (GB)" suffix="GB" value={form.storage_gb} onChange={set('storage_gb')} min={1} />
         <Field label="Max Image Size" suffix="MB / image" value={form.max_image_size_mb} onChange={set('max_image_size_mb')} min={1} />
+        {plan.key === 'premium' && (
+          <Field label="Extra GB Price (₹/GB)" prefix="₹" value={Math.round(form.extra_gb_price_paise / 100)}
+            onChange={v => set('extra_gb_price_paise')(v * 100)} min={1} />
+        )}
         <Field label="Tagline" type="text" value={form.tagline} onChange={set('tagline')} />
       </div>
 
@@ -234,7 +238,7 @@ function GrantFreeEvent({ users }) {
   const [form, setForm] = useState({
     user_id: '', event_name: '', event_type: 'Wedding',
     event_date: new Date().toISOString().split('T')[0],
-    photos_limit: 99999, storage_gb: 25, max_image_size_mb: 50,
+    storage_gb: 25, max_image_size_mb: 50,
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null); // { success, message }
@@ -253,7 +257,7 @@ function GrantFreeEvent({ users }) {
         p_event_name:        form.event_name,
         p_event_type:        form.event_type,
         p_event_date:        form.event_date,
-        p_photos_limit:      Number(form.photos_limit),
+        p_photos_limit:      99999,
         p_storage_gb:        Number(form.storage_gb),
         p_max_image_size_mb: Number(form.max_image_size_mb),
       });
@@ -328,15 +332,7 @@ function GrantFreeEvent({ users }) {
           <input type="date" value={form.event_date} onChange={set('event_date')} className={inputCls} />
         </div>
 
-        {/* Photos Limit */}
-        <div>
-          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">
-            <Images size={11} className="inline mr-1" />Photos Limit
-          </label>
-          <input type="number" min={1} value={form.photos_limit}
-            onChange={e => setForm(f => ({ ...f, photos_limit: Number(e.target.value) }))}
-            className={inputCls} />
-        </div>
+
 
         {/* Storage */}
         <div>
@@ -396,14 +392,15 @@ export default function Plans() {
 
   const handleSave = async (form) => {
     await supabase.rpc('admin_update_plan_config', {
-      p_key:               form.key,
-      p_label:             form.label,
-      p_amount_paise:      form.amount_paise,
-      p_photos_limit:      form.photos_limit,
-      p_storage_gb:        form.storage_gb,
-      p_max_image_size_mb: form.max_image_size_mb,
-      p_tagline:           form.tagline,
-      p_is_active:         form.is_active,
+      p_key:                  form.key,
+      p_label:                form.label,
+      p_amount_paise:         form.amount_paise,
+      p_photos_limit:         99999,
+      p_storage_gb:           form.storage_gb,
+      p_max_image_size_mb:    form.max_image_size_mb,
+      p_tagline:              form.tagline,
+      p_is_active:            form.is_active,
+      p_extra_gb_price_paise: form.extra_gb_price_paise,
     });
     // Refresh configs — always keep all 3 cards
     const { data } = await supabase.from('plan_configs').select('*').order('amount_paise');
