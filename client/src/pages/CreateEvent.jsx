@@ -5,18 +5,12 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import {
-  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper, HardDrive,
+  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper, HardDrive, RefreshCw,
 } from 'lucide-react';
 
 const EVENT_CATEGORIES = [
-  'Wedding',
-  'Pre-Wedding / Engagement',
-  'Reception',
-  'Birthday',
-  'Corporate Event',
-  'Baby Shower',
-  'Anniversary',
-  'Other',
+  'Wedding', 'Pre-Wedding / Engagement', 'Reception', 'Birthday',
+  'Corporate Event', 'Baby Shower', 'Anniversary', 'Other',
 ];
 
 export default function CreateEvent() {
@@ -24,10 +18,11 @@ export default function CreateEvent() {
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
 
-  const [purchase, setPurchase] = useState(null);
-  const [form, setForm] = useState({ name: '', category: 'Wedding', date: '' });
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [purchase, setPurchase]           = useState(null);    // per-event purchase
+  const [subscription, setSubscription]   = useState(null);   // active monthly subscription
+  const [form, setForm]                   = useState({ name: '', category: 'Wedding', date: '' });
+  const [saving, setSaving]               = useState(false);
+  const [toast, setToast]                 = useState(null);
 
   const showToast = (type, title, message) => {
     setToast({ type, title, message });
@@ -35,51 +30,107 @@ export default function CreateEvent() {
   };
 
   useEffect(() => {
-    const raw = sessionStorage.getItem('pendingPurchase');
-    if (!raw) {
-      // No payment found — redirect to pricing
-      navigate('/pricing', { replace: true });
-      return;
-    }
-    try {
-      setPurchase(JSON.parse(raw));
-    } catch {
-      navigate('/pricing', { replace: true });
-    }
-  }, [navigate]);
+    if (!user) return;
+
+    // Check for active subscription from DB first (most authoritative source)
+    supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .gt('end_date', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        const activeSub = data?.[0] ?? null;
+
+        if (activeSub) {
+          // User has an active subscription — all new events go to the pool
+          setSubscription(activeSub);
+
+          // Clear any stale sessionStorage purchase
+          sessionStorage.removeItem('pendingPurchase');
+          return;
+        }
+
+        // No active subscription — check for per-event purchase
+        const raw = sessionStorage.getItem('pendingPurchase');
+        if (!raw) {
+          navigate('/pricing', { replace: true });
+          return;
+        }
+        try {
+          setPurchase(JSON.parse(raw));
+        } catch {
+          navigate('/pricing', { replace: true });
+        }
+      });
+  }, [user, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user || !purchase) return;
+    if (!user) return;
+    if (!purchase && !subscription) return;
 
     setSaving(true);
-    const { data, error } = await supabase
-      .from('events')
-      .insert({
-        user_id:         user.id,
-        name:            form.name.trim(),
-        type:            form.category,
-        date:            form.date,
-        purchase_id:     purchase.purchaseId,
-        photos_limit:    99999,
-        storage_gb:      purchase.storageGb,
-        max_image_size_mb: purchase.maxImageSizeMb ?? 50,
-      })
-      .select()
-      .single();
 
-    setSaving(false);
+    if (subscription) {
+      // ── Subscription-based event ──────────────────────────────────────────
+      const { data, error } = await supabase
+        .from('events')
+        .insert({
+          user_id:          user.id,
+          name:             form.name.trim(),
+          type:             form.category,
+          date:             form.date,
+          subscription_id:  subscription.id,
+          storage_gb:       subscription.storage_gb,   // reference, actual limit is pooled
+          max_image_size_mb: subscription.max_image_size_mb ?? 50,
+          photos_limit:     99999,
+        })
+        .select()
+        .single();
 
-    if (error) {
-      showToast('error', 'Failed to create event', error.message);
-      return;
+      setSaving(false);
+
+      if (error) {
+        showToast('error', 'Failed to create event', error.message);
+        return;
+      }
+      navigate(`/events/${data.id}`);
+
+    } else {
+      // ── Per-event purchase ────────────────────────────────────────────────
+      const { data, error } = await supabase
+        .from('events')
+        .insert({
+          user_id:          user.id,
+          name:             form.name.trim(),
+          type:             form.category,
+          date:             form.date,
+          purchase_id:      purchase.purchaseId,
+          photos_limit:     99999,
+          storage_gb:       purchase.storageGb,
+          max_image_size_mb: purchase.maxImageSizeMb ?? 50,
+        })
+        .select()
+        .single();
+
+      setSaving(false);
+
+      if (error) {
+        showToast('error', 'Failed to create event', error.message);
+        return;
+      }
+
+      sessionStorage.removeItem('pendingPurchase');
+      navigate(`/events/${data.id}`);
     }
-
-    sessionStorage.removeItem('pendingPurchase');
-    navigate(`/events/${data.id}`);
   };
 
-  if (!purchase) {
+  const isReady = purchase || subscription;
+
+  if (!isReady) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center min-h-64">
@@ -89,18 +140,29 @@ export default function CreateEvent() {
     );
   }
 
+  const formatDate = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+
   return (
     <DashboardLayout>
       <div className="max-w-2xl mx-auto py-10">
         {/* Header */}
         <div className="mb-10">
           <div className="flex items-center gap-2 mb-4">
-            <span
-              className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
-              style={{ background: '#89f5e7', color: '#00685f' }}
-            >
-              <PartyPopper size={12} /> Payment Successful
-            </span>
+            {subscription ? (
+              <span
+                className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
+                style={{ background: '#89f5e7', color: '#00685f' }}
+              >
+                <RefreshCw size={12} /> Monthly Plan Active
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
+                style={{ background: '#89f5e7', color: '#00685f' }}
+              >
+                <PartyPopper size={12} /> Payment Successful
+              </span>
+            )}
           </div>
           <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900 mb-2">
             Create Your Event
@@ -116,14 +178,33 @@ export default function CreateEvent() {
           style={{ background: '#f3f3f4', borderColor: '#e2e2e2' }}
         >
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Active Plan</p>
-            <p className="font-bold text-zinc-900 capitalize">{purchase.plan} Plan</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">
+              {subscription ? 'Monthly Subscription' : 'Active Plan'}
+            </p>
+            <p className="font-bold text-zinc-900 capitalize flex items-center gap-1.5">
+              {subscription
+                ? <><RefreshCw size={13} className="text-teal-600" /> {subscription.plan_key.replace(/_/g, ' ')}</>
+                : `${purchase.plan} Plan`
+              }
+            </p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Storage</p>
-            <p className="font-bold text-teal-700 flex items-center gap-1 justify-end">
-              <HardDrive size={13} /> {purchase.storageGb} GB · Max {purchase.maxImageSizeMb ?? 50} MB/photo
-            </p>
+            {subscription ? (
+              <>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Shared Pool</p>
+                <p className="font-bold text-teal-700 flex items-center gap-1 justify-end">
+                  <HardDrive size={13} /> {subscription.storage_gb} GB · Expires {formatDate(subscription.end_date)}
+                </p>
+                <p className="text-[10px] text-zinc-400 mt-0.5">Storage shared across all your events</p>
+              </>
+            ) : (
+              <>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Storage</p>
+                <p className="font-bold text-teal-700 flex items-center gap-1 justify-end">
+                  <HardDrive size={13} /> {purchase.storageGb} GB · Max {purchase.maxImageSizeMb ?? 50} MB/photo
+                </p>
+              </>
+            )}
           </div>
         </div>
 

@@ -9,9 +9,12 @@ import {
 
 
 const PLAN_META = {
-  basic:   { icon: Zap,   iconBg: 'bg-zinc-100',  iconColor: 'text-zinc-600',  border: 'border-zinc-200'  },
-  pro:     { icon: Star,  iconBg: 'bg-teal-50',   iconColor: 'text-teal-600',  border: 'border-teal-200'  },
-  premium: { icon: Crown, iconBg: 'bg-orange-50', iconColor: 'text-orange-600',border: 'border-orange-200'},
+  basic:           { icon: Zap,   iconBg: 'bg-zinc-100',  iconColor: 'text-zinc-600',  border: 'border-zinc-200'   },
+  pro:             { icon: Star,  iconBg: 'bg-teal-50',   iconColor: 'text-teal-600',  border: 'border-teal-200'   },
+  premium:         { icon: Crown, iconBg: 'bg-orange-50', iconColor: 'text-orange-600',border: 'border-orange-200' },
+  monthly_starter: { icon: Zap,   iconBg: 'bg-zinc-100',  iconColor: 'text-zinc-600',  border: 'border-zinc-200'   },
+  monthly_pro:     { icon: Star,  iconBg: 'bg-teal-50',   iconColor: 'text-teal-600',  border: 'border-teal-200'   },
+  monthly_elite:   { icon: Crown, iconBg: 'bg-orange-50', iconColor: 'text-orange-600',border: 'border-orange-200' },
 };
 
 // Always show these 3 cards — DB data merges on top; zeros shown if DB is empty
@@ -370,21 +373,33 @@ function GrantFreeEvent({ users }) {
 export default function Plans() {
   const { session } = useAuth();
   const [configs, setConfigs] = useState([]);
+  const [monthlyConfigs, setMonthlyConfigs] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const MONTHLY_DEFAULTS = [
+    { key: 'monthly_starter', label: 'Starter Monthly', amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
+    { key: 'monthly_pro',     label: 'Pro Monthly',     amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
+    { key: 'monthly_elite',   label: 'Elite Monthly',   amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
+  ];
 
   useEffect(() => {
     if (!session?.access_token) return;
     (async () => {
       setLoading(true);
-      const [{ data: planData }, { data: usersData }] = await Promise.all([
+      const [{ data: planData }, { data: usersData }, { data: monthlyData }] = await Promise.all([
         supabase.from('plan_configs').select('*').order('amount_paise'),
         supabase.rpc('admin_get_users'),
+        supabase.from('monthly_plan_configs').select('*').order('amount_paise'),
       ]);
-      // Merge DB data onto defaults — always show all 3 cards even if DB is empty
       const dbMap = Object.fromEntries((planData ?? []).map(p => [p.key, p]));
       const merged = PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d);
       setConfigs(merged);
+
+      const mdbMap = Object.fromEntries((monthlyData ?? []).map(p => [p.key, p]));
+      const mmerged = MONTHLY_DEFAULTS.map(d => mdbMap[d.key] ? { ...d, ...mdbMap[d.key] } : d);
+      setMonthlyConfigs(mmerged);
+
       setUsers(Array.isArray(usersData) ? usersData : []);
       setLoading(false);
     })();
@@ -402,11 +417,32 @@ export default function Plans() {
       p_is_active:            form.is_active,
       p_extra_gb_price_paise: form.extra_gb_price_paise,
     });
-    // Refresh configs — always keep all 3 cards
     const { data } = await supabase.from('plan_configs').select('*').order('amount_paise');
     const dbMap = Object.fromEntries((data ?? []).map(p => [p.key, p]));
     const merged = PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d);
     setConfigs(merged);
+  };
+
+  const handleMonthlySave = async (form) => {
+    await supabase.from('monthly_plan_configs').upsert({
+      key:               form.key,
+      label:             form.label,
+      amount_paise:      form.amount_paise,
+      storage_gb:        form.storage_gb,
+      max_image_size_mb: form.max_image_size_mb,
+      tagline:           form.tagline,
+      is_active:         form.is_active,
+      updated_at:        new Date().toISOString(),
+    }, { onConflict: 'key' });
+    const { data } = await supabase.from('monthly_plan_configs').select('*').order('amount_paise');
+    const mdbMap = Object.fromEntries((data ?? []).map(p => [p.key, p]));
+    const MONTHLY_DEFAULTS = [
+      { key: 'monthly_starter', label: 'Starter Monthly', amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
+      { key: 'monthly_pro',     label: 'Pro Monthly',     amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
+      { key: 'monthly_elite',   label: 'Elite Monthly',   amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
+    ];
+    const mmerged = MONTHLY_DEFAULTS.map(d => mdbMap[d.key] ? { ...d, ...mdbMap[d.key] } : d);
+    setMonthlyConfigs(mmerged);
   };
 
   return (
@@ -425,10 +461,27 @@ export default function Plans() {
         <div className="space-y-10">
           {/* Plan Config Cards */}
           <section>
-            <h2 className="text-lg font-bold text-zinc-900 mb-4">Plan Configuration</h2>
+            <h2 className="text-lg font-bold text-zinc-900 mb-1">Per-Event Plan Configuration</h2>
+            <p className="text-xs text-zinc-400 mb-4">One-time payment · Each event gets its own dedicated storage</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {configs.map(plan => (
                 <PlanCard key={plan.key} plan={plan} onSave={handleSave} />
+              ))}
+            </div>
+          </section>
+
+          {/* Monthly Plan Cards */}
+          <section>
+            <h2 className="text-lg font-bold text-zinc-900 mb-1">Monthly Subscription Configuration</h2>
+            <p className="text-xs text-zinc-400 mb-4">Monthly recurring · Shared storage pool across all events</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {monthlyConfigs.map(plan => (
+                <PlanCard
+                  key={plan.key}
+                  plan={{ ...plan, extra_gb_price_paise: undefined }}
+                  onSave={handleMonthlySave}
+                  hideExtraGb
+                />
               ))}
             </div>
           </section>

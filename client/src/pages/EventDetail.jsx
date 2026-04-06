@@ -7,6 +7,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import UpgradePlan from '../components/UpgradePlan';
+import MonthlyUpgradePlan from '../components/MonthlyUpgradePlan';
 import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ImageIcon,
   CalendarDays, Tag, Images, ArrowLeft, CloudUpload, ArrowUp,
@@ -150,14 +151,17 @@ export default function EventDetail() {
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast]           = useState(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [showMonthlyUpgrade, setShowMonthlyUpgrade] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [tempPassword, setTempPassword] = useState('');
   const [copied, setCopied] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
-  const [activeTab, setActiveTab] = useState('all'); // 'all' or 'selected'
-  const [signedUrls, setSignedUrls] = useState({});  // { photoId → signed GET URL }
+  const [activeTab, setActiveTab] = useState('all');
+  const [signedUrls, setSignedUrls] = useState({});
+  const [subscription, setSubscription] = useState(null);       // active subscription if event is in pool
+  const [poolUsedBytes, setPoolUsedBytes] = useState(0);       // total bytes used across subscription events
   const fileInputRef                = useRef(null);
 
   useEffect(() => {
@@ -206,6 +210,41 @@ export default function EventDetail() {
 
   useEffect(() => { fetchEvent(true); }, [fetchEvent]);
 
+  // If event has a subscription_id, fetch subscription data + pool usage
+  useEffect(() => {
+    if (!event?.subscription_id) {
+      setSubscription(null);
+      setPoolUsedBytes(0);
+      return;
+    }
+    supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('id', event.subscription_id)
+      .single()
+      .then(({ data: sub }) => {
+        if (!sub) return;
+        setSubscription(sub);
+
+        // Fetch all events in this subscription pool, then sum their photo sizes
+        supabase
+          .from('events')
+          .select('id')
+          .eq('subscription_id', sub.id)
+          .then(({ data: poolEvents }) => {
+            if (!poolEvents?.length) return;
+            supabase
+              .from('photos')
+              .select('size_bytes')
+              .in('event_id', poolEvents.map(e => e.id))
+              .then(({ data: poolPhotos }) => {
+                const total = (poolPhotos ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+                setPoolUsedBytes(total);
+              });
+          });
+      });
+  }, [event?.subscription_id]);
+
   // ── Upload to iDrive e2 Storage (S3-compatible) ───────────────────────────
   const uploadFiles = useCallback(async (files) => {
     if (!user || !event) return;
@@ -223,12 +262,17 @@ export default function EventDetail() {
         showToast('error', 'Invalid file', `"${f.name}" is not an image.`);
         continue;
       }
-      const storageUsed  = photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+      // Check storage limit (pool-aware)
+      const isPooled = !!event.subscription_id;
+      const storageUsed = isPooled
+        ? poolUsedBytes
+        : photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+      const limitGb = isPooled ? (subscription?.storage_gb ?? event.storage_gb) : event.storage_gb;
       const pendingBytes  = validFiles.reduce((acc, f) => acc + f.size, 0);
-      const storageLimit  = event.storage_gb * 1024 * 1024 * 1024;
+      const storageLimit  = limitGb * 1024 * 1024 * 1024;
       if (storageUsed + pendingBytes + f.size > storageLimit) {
-        showToast('error', 'Storage limit reached', `Adding "${f.name}" would exceed your ${event.storage_gb} GB storage limit.`);
-        setShowUpgrade(true);
+        showToast('error', 'Storage limit reached', `Adding "${f.name}" would exceed your ${limitGb} GB ${isPooled ? 'shared ' : ''}storage limit.`);
+        if (!isPooled) setShowUpgrade(true);
         break;
       }
       validFiles.push(f);
@@ -294,9 +338,12 @@ export default function EventDetail() {
   const handleDragLeave = ()  => setIsDragging(false);
   const handleFilePick  = (e) => uploadFiles(Array.from(e.target.files));
 
-  const storageUsedBytes  = photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-  const storageLimitBytes  = event ? event.storage_gb * 1024 * 1024 * 1024 : 1;
-  const storagePercent     = event ? Math.min(100, (storageUsedBytes / storageLimitBytes) * 100) : 0;
+  // Subscription-pool-aware storage metrics
+  const isPooled           = !!event?.subscription_id;
+  const storageUsedBytes   = isPooled ? poolUsedBytes : photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+  const limitGb            = isPooled ? (subscription?.storage_gb ?? event?.storage_gb ?? 1) : (event?.storage_gb ?? 1);
+  const storageLimitBytes  = limitGb * 1024 * 1024 * 1024;
+  const storagePercent     = Math.min(100, (storageUsedBytes / storageLimitBytes) * 100);
   const quotaWarning       = storagePercent >= 90 && storagePercent < 100;
   const quotaFull          = storagePercent >= 100;
 
@@ -403,6 +450,46 @@ export default function EventDetail() {
       await fetchEvent();
     } catch (err) {
       showToast('error', 'Deletion Failed', err.message);
+    } finally {
+      setActionLoading({ loading: false, message: '' });
+    }
+  };
+
+  // Clear ALL photos from this event — deletes from storage + DB
+  const handleClearAllPhotos = async () => {
+    if (!photos.length) return;
+    if (!window.confirm(`This will permanently delete all ${photos.length} photos from this event and storage. This cannot be undone.`)) return;
+
+    setActionLoading({ loading: true, message: `Clearing all ${photos.length} photos…` });
+    try {
+      // 1. Delete from R2/iDrive
+      const idrivePaths = photos
+        .filter(p => p.storage_path && !p.supabase_url?.includes('supabase.co'))
+        .map(p => p.storage_path);
+      if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
+
+      // 2. Delete old Supabase Storage photos
+      const supaPaths = photos
+        .filter(p => p.supabase_url?.includes('supabase.co') && p.storage_path)
+        .map(p => p.storage_path);
+      if (supaPaths.length) {
+        await supabase.storage.from('photos').remove(supaPaths);
+      }
+
+      // 3. Delete all from DB
+      const { error: dbErr } = await supabase
+        .from('photos')
+        .delete()
+        .eq('event_id', event.id);
+
+      if (dbErr) throw dbErr;
+
+      setSignedUrls({});
+      setSelectedIds(new Set());
+      showToast('success', 'Cleared', `All ${photos.length} photos have been deleted.`);
+      await fetchEvent();
+    } catch (err) {
+      showToast('error', 'Clear Failed', err.message);
     } finally {
       setActionLoading({ loading: false, message: '' });
     }
@@ -529,12 +616,17 @@ export default function EventDetail() {
               <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
                 <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
                   <HardDrive size={14} className="text-teal-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest">Storage</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest">
+                    {isPooled ? 'Shared Pool' : 'Storage'}
+                  </p>
                 </div>
                 <div className="flex items-baseline gap-1">
                   <p className="text-lg font-bold text-zinc-900">{formatBytes(storageUsedBytes)}</p>
-                  <p className="text-[11px] font-semibold text-zinc-400">/ {event.storage_gb} GB</p>
+                  <p className="text-[11px] font-semibold text-zinc-400">/ {limitGb} GB</p>
                 </div>
+                {isPooled && (
+                  <p className="text-[10px] text-zinc-400 leading-tight">across all events</p>
+                )}
                 <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-teal-500'}`}
@@ -543,10 +635,21 @@ export default function EventDetail() {
                 </div>
               </div>
 
-              {/* Upgrade button - forced to same height via items-stretch */}
-              {!showUpgrade && (
+              {/* Upgrade button — hidden for subscription pool events */}
+              {!showUpgrade && !isPooled && (
                 <button
                   onClick={() => setShowUpgrade(true)}
+                  className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50/40 hover:bg-teal-50 hover:border-teal-400 hover:shadow-md transition-all active:scale-95"
+                >
+                  <ArrowUp size={14} className="mb-[-2px]" />
+                  <span>Upgrade Plan</span>
+                </button>
+              )}
+
+              {/* Upgrade button for subscription pool events */}
+              {!showMonthlyUpgrade && isPooled && (
+                <button
+                  onClick={() => setShowMonthlyUpgrade(true)}
                   className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50/40 hover:bg-teal-50 hover:border-teal-400 hover:shadow-md transition-all active:scale-95"
                 >
                   <ArrowUp size={14} className="mb-[-2px]" />
@@ -558,38 +661,86 @@ export default function EventDetail() {
         </div>
 
         {/* Quota warning / full banners */}
+        {/* Quota full banner */}
         {quotaFull && !showUpgrade && (
           <div className="flex items-center justify-between gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
             <div>
               <p className="text-sm font-bold text-red-700">📛 Storage limit reached</p>
-              <p className="text-xs text-red-500 mt-0.5">You've used all {event.storage_gb} GB. Upgrade to continue uploading.</p>
+              <p className="text-xs text-red-500 mt-0.5">
+                {isPooled
+                  ? `Your ${limitGb} GB shared pool is full. Upgrade your monthly plan for more storage.`
+                  : `You've used all ${limitGb} GB. Upgrade to continue uploading.`
+                }
+              </p>
             </div>
-            <button
-              onClick={() => setShowUpgrade(true)}
-              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold silk-gradient text-white shadow hover:opacity-90 active:scale-95 transition-all"
-            >
-              <ArrowUp size={12} /> Upgrade Now
-            </button>
+            {isPooled ? (
+              <button
+                onClick={() => navigate('/pricing?tab=monthly')}
+                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold silk-gradient text-white shadow hover:opacity-90 active:scale-95 transition-all"
+              >
+                <ArrowUp size={12} /> Upgrade Plan
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowUpgrade(true)}
+                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold silk-gradient text-white shadow hover:opacity-90 active:scale-95 transition-all"
+              >
+                <ArrowUp size={12} /> Upgrade Now
+              </button>
+            )}
           </div>
         )}
 
+        {/* Quota warning banner */}
         {quotaWarning && !quotaFull && !showUpgrade && (
           <div className="flex items-center justify-between gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
             <div>
               <p className="text-sm font-bold text-amber-700">⚠️ Storage almost full</p>
-              <p className="text-xs text-amber-600 mt-0.5">{formatBytes(storageUsedBytes)} of {event.storage_gb} GB used — consider upgrading soon.</p>
+              <p className="text-xs text-amber-600 mt-0.5">
+                {formatBytes(storageUsedBytes)} of {limitGb} GB used
+                {isPooled ? ' — shared pool running low.' : ' — consider upgrading soon.'}
+              </p>
             </div>
-            <button
-              onClick={() => setShowUpgrade(true)}
-              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
-            >
-              <ArrowUp size={12} /> Add More
-            </button>
+            {isPooled ? (
+              <button
+                onClick={() => navigate('/pricing?tab=monthly')}
+                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
+              >
+                <ArrowUp size={12} /> Upgrade Plan
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowUpgrade(true)}
+                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
+              >
+                <ArrowUp size={12} /> Add More
+              </button>
+            )}
           </div>
         )}
 
-        {/* Upgrade Panel */}
-        {showUpgrade && (
+        {/* Monthly Upgrade Panel — for subscription pool events */}
+        {showMonthlyUpgrade && isPooled && subscription && (
+          <MonthlyUpgradePlan
+            subscription={subscription}
+            user={user}
+            onUpgraded={(newGb) => {
+              setShowMonthlyUpgrade(false);
+              showToast('success', 'Plan Upgraded!', `Monthly pool storage upgraded to ${newGb} GB.`);
+              // Re-fetch subscription so limitGb updates
+              supabase
+                .from('subscriptions')
+                .select('*')
+                .eq('id', event.subscription_id)
+                .single()
+                .then(({ data }) => { if (data) setSubscription(data); });
+            }}
+            onClose={() => setShowMonthlyUpgrade(false)}
+          />
+        )}
+
+        {/* Per-event Upgrade Panel */}
+        {showUpgrade && !isPooled && (
           <UpgradePlan
             event={event}
             user={user}
@@ -810,7 +961,7 @@ export default function EventDetail() {
               )}
             </div>
             
-            {/* Selection Actions Bar (Sticky) */}
+            {/* Selection Actions Bar — shown when items are selected */}
             {selectedIds.size > 0 && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
                 <span className="text-xs font-bold text-zinc-500 mr-2">{selectedIds.size} Selected</span>
@@ -834,6 +985,21 @@ export default function EventDetail() {
                   </button>
                 )}
               </div>
+            )}
+
+            {/* Clear All Photos — shown only when photos exist and nothing is selected */}
+            {photos.length > 0 && selectedIds.size === 0 && (
+              <button
+                onClick={handleClearAllPhotos}
+                disabled={!!actionLoading.loading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100 border border-red-100 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Delete all photos from this event and storage"
+              >
+                {actionLoading.loading
+                  ? <><Loader2 size={13} className="animate-spin" /> Clearing…</>
+                  : <><Trash2 size={13} /> Clear All Photos</>
+                }
+              </button>
             )}
           </div>
 

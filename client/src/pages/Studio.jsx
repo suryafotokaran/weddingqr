@@ -9,6 +9,8 @@ import {
   Tag,
   ChevronRight,
   FolderOpen,
+  RefreshCw,
+  Plus,
 } from 'lucide-react';
 
 function formatBytes(bytes) {
@@ -39,9 +41,11 @@ export default function Studio() {
   const fullName  = userData?.fullName  ?? 'Photographer';
 
   const [events,       setEvents]       = useState([]);
-  const [totalStorage, setTotalStorage] = useState(0); // bytes
-  const [storageUsed,  setStorageUsed]  = useState({}); // { eventId: bytes }
+  const [totalStorage, setTotalStorage] = useState(0);
+  const [storageUsed,  setStorageUsed]  = useState({});
   const [loading,      setLoading]      = useState(true);
+  const [activeSub,    setActiveSub]    = useState(null);
+  const [subStorageUsed, setSubStorageUsed] = useState(0);
 
   useEffect(() => {
     const user = userData?.user;
@@ -50,17 +54,28 @@ export default function Studio() {
     (async () => {
       setLoading(true);
 
-      // Fetch events + linked purchase plan
+      // Check active subscription
+      const { data: subData } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .gt('end_date', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1);
+      const sub = subData?.[0] ?? null;
+      setActiveSub(sub);
+
+      // Fetch events
       const { data: evs } = await supabase
         .from('events')
-        .select('id, name, type, date, photos_limit, storage_gb, created_at, purchase_id, purchases(plan)')
+        .select('id, name, type, date, storage_gb, subscription_id, created_at, purchase_id, purchases(plan)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       const eventList = evs ?? [];
       setEvents(eventList);
 
-      // Fetch storage used per event
       if (eventList.length > 0) {
         const { data: ph } = await supabase
           .from('photos')
@@ -73,6 +88,13 @@ export default function Studio() {
         }
         setStorageUsed(usage);
         setTotalStorage(Object.values(usage).reduce((a, b) => a + b, 0));
+
+        // Calculate subscription pool usage
+        if (sub) {
+          const subEvents = eventList.filter(e => e.subscription_id === sub.id);
+          const subUsed = subEvents.reduce((acc, e) => acc + (usage[e.id] ?? 0), 0);
+          setSubStorageUsed(subUsed);
+        }
       }
 
       setLoading(false);
@@ -88,6 +110,42 @@ export default function Studio() {
           {getGreeting()}, {fullName.split(' ')[0]}.
         </h1>
       </header>
+
+      {/* Active Subscription Banner */}
+      {activeSub && (
+        <section className="mb-6">
+          <div className="bg-gradient-to-r from-teal-600 to-teal-700 rounded-2xl p-6 text-white flex flex-col md:flex-row md:items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+              <RefreshCw size={22} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-teal-200 mb-0.5">Monthly Subscription · Active</p>
+              <p className="font-bold text-lg">{activeSub.plan_key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</p>
+              <div className="flex items-center gap-4 mt-1">
+                <span className="text-xs text-teal-100">
+                  {formatBytes(subStorageUsed)} / {activeSub.storage_gb} GB used
+                </span>
+                <span className="text-xs text-teal-200">
+                  Expires {formatDate(activeSub.end_date)}
+                </span>
+              </div>
+              {/* Pool progress bar */}
+              <div className="mt-2 h-1.5 bg-white/20 rounded-full overflow-hidden w-full max-w-xs">
+                <div
+                  className="h-full bg-white rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, (subStorageUsed / (activeSub.storage_gb * 1024 * 1024 * 1024)) * 100)}%` }}
+                />
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/createevent')}
+              className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-teal-700 text-sm font-bold hover:bg-teal-50 transition-all active:scale-95"
+            >
+              <Plus size={15} /> Create Event
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Stat Cards */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
