@@ -14,6 +14,13 @@ const PLAN_META = {
   premium: { icon: Crown, iconBg: 'bg-orange-50', iconColor: 'text-orange-600',border: 'border-orange-200'},
 };
 
+// Always show these 3 cards — DB data merges on top; zeros shown if DB is empty
+const PLAN_DEFAULTS = [
+  { key: 'basic',   label: 'Starter Plan',      amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, photos_limit: 0 },
+  { key: 'pro',     label: 'Professional Plan', amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, photos_limit: 0 },
+  { key: 'premium', label: 'Elite Plan',         amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, photos_limit: 0 },
+];
+
 function Field({ label, value, onChange, prefix, suffix, type = 'number', min }) {
   return (
     <div>
@@ -378,7 +385,10 @@ export default function Plans() {
         supabase.from('plan_configs').select('*').order('amount_paise'),
         supabase.rpc('admin_get_users'),
       ]);
-      setConfigs(planData ?? []);
+      // Merge DB data onto defaults — always show all 3 cards even if DB is empty
+      const dbMap = Object.fromEntries((planData ?? []).map(p => [p.key, p]));
+      const merged = PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d);
+      setConfigs(merged);
       setUsers(Array.isArray(usersData) ? usersData : []);
       setLoading(false);
     })();
@@ -395,9 +405,11 @@ export default function Plans() {
       p_tagline:           form.tagline,
       p_is_active:         form.is_active,
     });
-    // Refresh configs
+    // Refresh configs — always keep all 3 cards
     const { data } = await supabase.from('plan_configs').select('*').order('amount_paise');
-    setConfigs(data ?? []);
+    const dbMap = Object.fromEntries((data ?? []).map(p => [p.key, p]));
+    const merged = PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d);
+    setConfigs(merged);
   };
 
   return (
