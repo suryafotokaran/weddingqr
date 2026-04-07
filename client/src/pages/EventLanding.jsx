@@ -5,7 +5,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
   ArrowLeft, HardDrive, ArrowUp, Tag, CalendarDays,
-  Images, QrCode, Clock, ChevronRight, Sparkles
+  Images, QrCode, ChevronRight
 } from 'lucide-react';
 
 function formatBytes(bytes) {
@@ -33,7 +33,6 @@ export default function EventLanding() {
   const [subscription, setSubscription] = useState(null);
   const [poolUsedBytes, setPoolUsedBytes] = useState(0);
   const [photos, setPhotos] = useState([]);
-  const [showQRComingSoon, setShowQRComingSoon] = useState(false);
   const [hoveredCard, setHoveredCard] = useState(null);
 
   useEffect(() => {
@@ -238,7 +237,7 @@ export default function EventLanding() {
 
           {/* QR Upload Card */}
           <button
-            onClick={() => setShowQRComingSoon(true)}
+            onClick={() => navigate(`/events/${id}/qr-upload`)}
             onMouseEnter={() => setHoveredCard('qr')}
             onMouseLeave={() => setHoveredCard(null)}
             className="group relative text-left bg-white rounded-2xl border-2 border-zinc-100 shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 hover:border-violet-300 hover:shadow-[0_20px_60px_rgba(139,92,246,0.12)] transition-all duration-300 active:scale-[0.98] overflow-hidden"
@@ -252,9 +251,9 @@ export default function EventLanding() {
                 <QrCode size={26} className="text-white" />
               </div>
 
-              {/* Coming Soon Badge */}
-              <span className="absolute top-0 right-0 flex items-center gap-1 bg-violet-100 text-violet-700 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
-                <Sparkles size={10} /> Coming Soon
+              {/* Live Badge */}
+              <span className="absolute top-0 right-0 flex items-center gap-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" /> Live
               </span>
 
               <h2 className="text-xl font-extrabold text-zinc-900 mb-2 tracking-tight">QR Upload</h2>
@@ -263,64 +262,12 @@ export default function EventLanding() {
               </p>
 
               <div className="flex items-center gap-1.5 text-violet-600 font-bold text-sm group-hover:gap-2.5 transition-all duration-200">
-                Learn More <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
+                Open QR Upload <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
               </div>
             </div>
           </button>
         </div>
       </div>
-
-      {/* QR Coming Soon Modal */}
-      {showQRComingSoon && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-6"
-          onClick={() => setShowQRComingSoon(false)}
-        >
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-          <div
-            className="relative bg-white rounded-3xl shadow-2xl p-10 max-w-md w-full text-center animate-in zoom-in-95 fade-in duration-300"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Icon */}
-            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mx-auto mb-6 shadow-xl shadow-violet-500/30">
-              <QrCode size={36} className="text-white" />
-            </div>
-
-            <div className="flex items-center justify-center gap-2 mb-3">
-              <Sparkles size={14} className="text-violet-500" />
-              <p className="text-[11px] font-bold uppercase tracking-widest text-violet-500">Coming Soon</p>
-              <Sparkles size={14} className="text-violet-500" />
-            </div>
-
-            <h2 className="text-2xl font-extrabold text-zinc-900 mb-3 tracking-tight">QR Upload</h2>
-            <p className="text-sm text-zinc-500 leading-relaxed mb-2">
-              We're building a magical QR experience — guests will be able to scan a code and instantly upload their photos to your event gallery.
-            </p>
-            <p className="text-xs text-zinc-400 mb-8">Stay tuned for this exciting feature!</p>
-
-            <div className="flex items-center justify-center gap-3 mb-8">
-              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <Clock size={12} /> Guest QR scanning
-              </div>
-              <div className="w-1 h-1 rounded-full bg-zinc-200" />
-              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <Clock size={12} /> Auto-upload to gallery
-              </div>
-              <div className="w-1 h-1 rounded-full bg-zinc-200" />
-              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <Clock size={12} /> Real-time sync
-              </div>
-            </div>
-
-            <button
-              onClick={() => setShowQRComingSoon(false)}
-              className="w-full py-3 rounded-2xl bg-zinc-900 text-white font-bold text-sm hover:bg-zinc-800 transition-all active:scale-95"
-            >
-              Got it, Close
-            </button>
-          </div>
-        </div>
-      )}
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }

@@ -145,7 +145,8 @@ export default function EventDetail() {
   const user = userData?.user;
 
   const [event, setEvent]           = useState(null);
-  const [photos, setPhotos]         = useState([]);
+  const [photos, setPhotos]         = useState([]);       // host-only photos shown in gallery
+  const [allPhotos, setAllPhotos]   = useState([]);       // ALL photos (host+guest) for storage calc
   const [uploading, setUploading]   = useState([]);
   const [loading, setLoading]       = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -195,12 +196,16 @@ export default function EventDetail() {
       .single();
     setEvent(ev);
 
-    const { data: ph } = await supabase
+    // Fetch ALL photos — used for storage calculation
+    const { data: allPh } = await supabase
       .from('photos')
       .select('*')
       .eq('event_id', id)
       .order('created_at', { ascending: false });
-    setPhotos(ph ?? []);
+    const allPhArr = allPh ?? [];
+    setAllPhotos(allPhArr);
+    // Gallery only shows host-uploaded photos (source='host')
+    setPhotos(allPhArr.filter(p => p.source === 'host' || (!p.source && p.user_id)));
     if (isInitial) setLoading(false);
   }, [id]);
 
@@ -233,7 +238,8 @@ export default function EventDetail() {
           .eq('subscription_id', sub.id)
           .then(({ data: poolEvents }) => {
             if (!poolEvents?.length) return;
-            supabase
+            // Count ALL photos (host + guest) for pool storage
+        supabase
               .from('photos')
               .select('size_bytes')
               .in('event_id', poolEvents.map(e => e.id))
@@ -262,11 +268,11 @@ export default function EventDetail() {
         showToast('error', 'Invalid file', `"${f.name}" is not an image.`);
         continue;
       }
-      // Check storage limit (pool-aware)
+      // Check storage limit (pool-aware) — count ALL photos incl. guest uploads
       const isPooled = !!event.subscription_id;
       const storageUsed = isPooled
         ? poolUsedBytes
-        : photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+        : allPhotos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
       const limitGb = isPooled ? (subscription?.storage_gb ?? event.storage_gb) : event.storage_gb;
       const pendingBytes  = validFiles.reduce((acc, f) => acc + f.size, 0);
       const storageLimit  = limitGb * 1024 * 1024 * 1024;
@@ -312,7 +318,8 @@ export default function EventDetail() {
           storage_path: storagePath,
           file_name:    item.file.name,
           size_bytes:   item.file.size,
-          supabase_url: refUrl, // stores iDrive ref URL (signed URL generated on load)
+          supabase_url: refUrl,  // stores iDrive ref URL (signed URL generated on load)
+          source:       'host',  // photographer/host upload
         });
 
         if (dbErr) throw new Error(dbErr.message);
@@ -331,7 +338,7 @@ export default function EventDetail() {
     setTimeout(() => {
       setUploading(prev => prev.filter(u => u.status !== 'done'));
     }, 3000);
-  }, [user, event, photos.length, fetchEvent]);
+  }, [user, event, allPhotos, poolUsedBytes, subscription, fetchEvent]);
 
   const handleDrop      = useCallback((e) => { e.preventDefault(); setIsDragging(false); uploadFiles(Array.from(e.dataTransfer.files)); }, [uploadFiles]);
   const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
@@ -340,7 +347,7 @@ export default function EventDetail() {
 
   // Subscription-pool-aware storage metrics
   const isPooled           = !!event?.subscription_id;
-  const storageUsedBytes   = isPooled ? poolUsedBytes : photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+  const storageUsedBytes   = isPooled ? poolUsedBytes : allPhotos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
   const limitGb            = isPooled ? (subscription?.storage_gb ?? event?.storage_gb ?? 1) : (event?.storage_gb ?? 1);
   const storageLimitBytes  = limitGb * 1024 * 1024 * 1024;
   const storagePercent     = Math.min(100, (storageUsedBytes / storageLimitBytes) * 100);

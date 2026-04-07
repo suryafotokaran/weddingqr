@@ -375,16 +375,18 @@ export default function GuestEventView() {
               All Photos
               {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 rounded-full" />}
             </button>
-            <button 
-              onClick={() => setActiveTab('favorites')}
-              className={`pb-3 text-xs font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'favorites' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
-            >
-              Your Hearts
-              <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'favorites' ? 'bg-pink-100 text-pink-600' : 'bg-zinc-100 text-zinc-400'}`}>
-                {favorites.size}
-              </div>
-              {activeTab === 'favorites' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full" />}
-            </button>
+            {event?.allow_download && (
+              <button 
+                onClick={() => setActiveTab('favorites')}
+                className={`pb-3 text-xs font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'favorites' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
+              >
+                Your Hearts
+                <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'favorites' ? 'bg-pink-100 text-pink-600' : 'bg-zinc-100 text-zinc-400'}`}>
+                  {favorites.size}
+                </div>
+                {activeTab === 'favorites' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full" />}
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -425,16 +427,18 @@ export default function GuestEventView() {
                     <Loader2 size={20} className="animate-spin text-zinc-300" />
                   </div>
                 )}
-                <div 
-                  onClick={() => toggleFavorite(photo.id)}
-                  className={`absolute inset-0 transition-all duration-300 cursor-pointer ${favorites.has(photo.id) ? 'bg-pink-500/10 opacity-100' : 'bg-black/20 opacity-0 group-hover:opacity-100'}`}
-                >
-                  <div className="absolute top-3 right-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${favorites.has(photo.id) ? 'bg-pink-500 text-white scale-110' : 'bg-white/20 text-white/60 hover:text-white backdrop-blur-md'}`}>
-                      <Heart size={16} fill={favorites.has(photo.id) ? 'currentColor' : 'none'} />
+                {event?.allow_download && (
+                  <div 
+                    onClick={() => toggleFavorite(photo.id)}
+                    className={`absolute inset-0 transition-all duration-300 cursor-pointer ${favorites.has(photo.id) ? 'bg-pink-500/10 opacity-100' : 'bg-black/20 opacity-0 group-hover:opacity-100'}`}
+                  >
+                    <div className="absolute top-3 right-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${favorites.has(photo.id) ? 'bg-pink-500 text-white scale-110' : 'bg-white/20 text-white/60 hover:text-white backdrop-blur-md'}`}>
+                        <Heart size={16} fill={favorites.has(photo.id) ? 'currentColor' : 'none'} />
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
