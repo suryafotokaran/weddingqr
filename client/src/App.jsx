@@ -11,6 +11,7 @@ import Profile from './pages/Profile';
 import Pricing from './pages/Pricing';
 import CreateEvent from './pages/CreateEvent';
 import EventDetail from './pages/EventDetail';
+import EventLanding from './pages/EventLanding';
 import Events from './pages/Events';
 import GuestEventView from './pages/GuestEventView';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -30,7 +31,8 @@ export default function App() {
       <Route path="/pricing" element={<ProtectedRoute><Pricing /></ProtectedRoute>} />
       <Route path="/events" element={<ProtectedRoute><Events /></ProtectedRoute>} />
       <Route path="/createevent" element={<ProtectedRoute><CreateEvent /></ProtectedRoute>} />
-      <Route path="/events/:id" element={<ProtectedRoute><EventDetail /></ProtectedRoute>} />
+      <Route path="/events/:id" element={<ProtectedRoute><EventLanding /></ProtectedRoute>} />
+      <Route path="/events/:id/photos" element={<ProtectedRoute><EventDetail /></ProtectedRoute>} />
       <Route path="/v/:id" element={<GuestEventView />} />
 
       {/* Legacy redirect */}

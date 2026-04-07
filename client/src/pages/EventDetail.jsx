@@ -590,10 +590,10 @@ export default function EventDetail() {
 
         {/* Back */}
         <button
-          onClick={() => navigate('/studio')}
+          onClick={() => navigate(`/events/${id}`)}
           className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-teal-700 mb-6 transition-colors"
         >
-          <ArrowLeft size={16} /> Back to Dashboard
+          <ArrowLeft size={16} /> Back to Event
         </button>
 
         {/* Event Header */}
