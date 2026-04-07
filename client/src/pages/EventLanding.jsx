@@ -5,8 +5,10 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
   ArrowLeft, HardDrive, ArrowUp, Tag, CalendarDays,
-  Images, QrCode, ChevronRight
+  Images, QrCode, ChevronRight, Trash2
 } from 'lucide-react';
+import { deleteFromIDrive } from '../lib/s3';
+import ConfirmModal from '../components/ConfirmModal';
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -34,6 +36,11 @@ export default function EventLanding() {
   const [poolUsedBytes, setPoolUsedBytes] = useState(0);
   const [photos, setPhotos] = useState([]);
   const [hoveredCard, setHoveredCard] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
+
+  const triggerConfirm = (title, message, action) => setConfirmModal({ isOpen: true, title, message, action });
+  const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
     const fetchEvent = async () => {
@@ -47,7 +54,7 @@ export default function EventLanding() {
 
       const { data: ph } = await supabase
         .from('photos')
-        .select('size_bytes')
+        .select('size_bytes, storage_path')
         .eq('event_id', id);
       setPhotos(ph ?? []);
 
@@ -138,6 +145,39 @@ export default function EventLanding() {
       </DashboardLayout>
     );
   }
+
+  const handleDeleteEvent = () => {
+    triggerConfirm(
+      'Delete Entire Event',
+      'Are you sure you want to completely delete this event? This will permanently delete all photos, QR codes, and settings. This cannot be undone.',
+      async () => {
+        closeConfirm();
+        setIsDeleting(true);
+        try {
+          // 1. Delete from Cloudflare/iDrive
+          if (photos.length > 0) {
+            const idrivePaths = photos.map(p => p.storage_path).filter(Boolean);
+            if (idrivePaths.length > 0) {
+              await deleteFromIDrive(idrivePaths);
+            }
+          }
+
+          // 2. Delete photos from DB
+          await supabase.from('photos').delete().eq('event_id', id);
+
+          // 3. Delete event from DB
+          const { error } = await supabase.from('events').delete().eq('id', id);
+          if (error) throw error;
+
+          navigate('/studio');
+        } catch (err) {
+          console.error(err);
+          alert('Failed to delete event: ' + err.message);
+          setIsDeleting(false);
+        }
+      }
+    );
+  };
 
   return (
     <DashboardLayout>
@@ -267,12 +307,36 @@ export default function EventLanding() {
             </div>
           </button>
         </div>
+
+        {/* Danger Zone */}
+        <div className="mt-12 bg-red-50 border border-red-100 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-red-800 tracking-tight">Delete Event</h3>
+            <p className="text-sm text-red-600 mt-1 max-w-xl">Permanently remove this event and all associated photos from cloud storage. This action cannot be reversed.</p>
+          </div>
+          <button
+            onClick={handleDeleteEvent}
+            disabled={isDeleting}
+            className="shrink-0 flex items-center gap-2 px-6 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm shadow-sm hover:bg-red-700 hover:shadow-md transition-all active:scale-95 disabled:opacity-50"
+          >
+            {isDeleting ? 'Deleting...' : <><Trash2 size={16} /> Delete Event</>}
+          </button>
+        </div>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
         .skeleton-shimmer { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent); animation: shimmer 1.5s infinite; }
       `}} />
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.action || (() => {})}
+        onCancel={closeConfirm}
+        confirmText="Delete"
+      />
     </DashboardLayout>
   );
 }

@@ -8,11 +8,12 @@ import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import UpgradePlan from '../components/UpgradePlan';
 import MonthlyUpgradePlan from '../components/MonthlyUpgradePlan';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   ArrowLeft, QrCode, Download, Copy, Check, RefreshCw,
   Images, CalendarDays, Tag, Loader2, ExternalLink,
   Upload, X, CheckCircle, AlertCircle, ImageIcon, CloudUpload,
-  Eye, EyeOff, Trash2, Square, CheckSquare, MonitorOff, HardDrive, ArrowUp
+  Eye, EyeOff, Trash2, Square, CheckSquare, MonitorOff, HardDrive, ArrowUp, Palette
 } from 'lucide-react';
 
 function formatBytes(bytes) {
@@ -156,8 +157,15 @@ export default function QRUpload() {
   const [uploading, setUploading] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
+
+  const triggerConfirm = (title, message, action) => {
+    setConfirmModal({ isOpen: true, title, message, action });
+  };
+  const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
+  const [showGallery, setShowGallery] = useState(false);
   const fileInputRef = useRef(null);
   const qrRef = useRef(null);
 
@@ -298,7 +306,8 @@ export default function QRUpload() {
       try {
         const ext = item.file.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const storagePath = `qr_gallery/${event.id}/${fileName}`;
+        const folderName = event?.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+        const storagePath = `${folderName}_qrupload/${fileName}`;
 
         // Upload to iDrive
         await uploadToIDrive(item.file, storagePath);
@@ -457,41 +466,46 @@ export default function QRUpload() {
   };
 
   /* ── Delete selected photos ── */
-  const handleDeleteSelected = async () => {
-    if (!window.confirm(`Delete ${selectedIds.size} photos? This cannot be undone.`)) return;
+  const handleDeleteSelected = () => {
+    triggerConfirm(
+      'Delete Selected Photos',
+      `Are you sure you want to permanently delete ${selectedIds.size} photos? This cannot be undone.`,
+      async () => {
+        closeConfirm();
+        setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos...` });
+        try {
+          const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
 
-    setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos...` });
-    try {
-      const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
+          // Delete from iDrive
+          const idrivePaths = selectedPhotos
+            .filter(p => !p.supabase_url?.includes('supabase.co'))
+            .map(p => p.storage_path);
+          if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
 
-      // Delete from iDrive
-      const idrivePaths = selectedPhotos
-        .filter(p => !p.supabase_url?.includes('supabase.co'))
-        .map(p => p.storage_path);
-      if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
+          // Delete from DB
+          const { error: dbErr } = await supabase
+            .from('photos')
+            .delete()
+            .in('id', Array.from(selectedIds));
 
-      // Delete from DB
-      const { error: dbErr } = await supabase
-        .from('photos')
-        .delete()
-        .in('id', Array.from(selectedIds));
+          if (dbErr) throw dbErr;
 
-      if (dbErr) throw dbErr;
+          setSignedUrls(prev => {
+            const next = { ...prev };
+            Array.from(selectedIds).forEach(id => delete next[id]);
+            return next;
+          });
 
-      setSignedUrls(prev => {
-        const next = { ...prev };
-        Array.from(selectedIds).forEach(id => delete next[id]);
-        return next;
-      });
-
-      showToast('success', 'Deleted', `${selectedIds.size} photos removed.`);
-      setSelectedIds(new Set());
-      await fetchData();
-    } catch (err) {
-      showToast('error', 'Deletion Failed', err.message);
-    } finally {
-      setActionLoading({ loading: false, message: '' });
-    }
+          showToast('success', 'Deleted', `${selectedIds.size} photos removed.`);
+          setSelectedIds(new Set());
+          await fetchData();
+        } catch (err) {
+          showToast('error', 'Deletion Failed', err.message);
+        } finally {
+          setActionLoading({ loading: false, message: '' });
+        }
+      }
+    );
   };
 
   if (loading) {
@@ -766,6 +780,43 @@ export default function QRUpload() {
                     <div className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform duration-300 ${event.allow_screenshot ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-zinc-50">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                      <Palette size={14} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-zinc-900">QR Theme Color</h4>
+                      <p className="text-[10px] text-zinc-400">Match your wedding style</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="text"
+                      value={event.theme_color || '#5b21b6'}
+                      onChange={(e) => setEvent({ ...event, theme_color: e.target.value })}
+                      onBlur={(e) => {
+                        let finalVal = event.theme_color || '#5b21b6';
+                        if (!finalVal.startsWith('#')) finalVal = '#' + finalVal;
+                        if (finalVal !== event.theme_color) setEvent({ ...event, theme_color: finalVal });
+                        updateEventSetting('theme_color', finalVal, 'Theme Swapped', 'Color successfully changed.');
+                      }}
+                      className="w-20 px-2 py-1.5 text-xs font-mono uppercase bg-zinc-50 border border-zinc-200 rounded outline-none focus:border-violet-500 text-zinc-700"
+                      placeholder="#5B21B6"
+                      maxLength={7}
+                    />
+                    <div className="relative w-8 h-8 rounded-full overflow-hidden border border-zinc-200 shadow-sm shrink-0">
+                      <input 
+                        type="color"
+                        value={event.theme_color || '#5b21b6'}
+                        onChange={(e) => setEvent({ ...event, theme_color: e.target.value })}
+                        onBlur={(e) => updateEventSetting('theme_color', e.target.value, 'Theme Swapped', 'Color successfully changed.')}
+                        className="absolute -top-2 -left-2 w-12 h-12 p-0 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -789,7 +840,7 @@ export default function QRUpload() {
                   value={qrViewUrl}
                   size={180}
                   bgColor="#ffffff"
-                  fgColor="#5b21b6"
+                  fgColor={event.theme_color || '#5b21b6'}
                   level="M"
                   includeMargin={false}
                 />
@@ -904,7 +955,7 @@ export default function QRUpload() {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
               <h2 className="text-xl font-bold tracking-tight text-zinc-900">QR Gallery Photos</h2>
-              {photos.length > 0 && (
+              {showGallery && photos.length > 0 && (
                 <button
                   onClick={handleSelectAll}
                   className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-violet-600 transition-colors"
@@ -916,7 +967,7 @@ export default function QRUpload() {
             </div>
 
             {/* Selection Actions */}
-            {selectedIds.size > 0 && (
+            {showGallery && selectedIds.size > 0 && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
                 <span className="text-xs font-bold text-zinc-500 mr-2">{selectedIds.size} Selected</span>
                 <button
@@ -930,7 +981,7 @@ export default function QRUpload() {
             )}
 
             {/* Refresh */}
-            {photos.length > 0 && selectedIds.size === 0 && (
+            {showGallery && photos.length > 0 && selectedIds.size === 0 && (
               <button
                 onClick={fetchData}
                 className="p-2 rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
@@ -941,7 +992,19 @@ export default function QRUpload() {
             )}
           </div>
 
-          {photos.length === 0 ? (
+          {!showGallery ? (
+            <div className="flex flex-col items-center justify-center py-20 bg-zinc-50/50 rounded-xl border border-zinc-100">
+              <Images size={40} className="text-violet-200 mb-4" />
+              <p className="text-zinc-600 font-medium mb-1">Gallery preview is hidden</p>
+              <p className="text-xs text-zinc-400 mb-6 max-w-sm text-center">To save bandwidth, photos are not loaded automatically. Click below to view the uploaded photos.</p>
+              <button
+                onClick={() => setShowGallery(true)}
+                className="px-6 py-2.5 rounded-xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 transition-all shadow-md active:scale-95 flex items-center gap-2"
+              >
+                <Eye size={16} /> View Photos
+              </button>
+            </div>
+          ) : photos.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
               <ImageIcon size={40} className="mb-3 opacity-30" />
               <p className="font-medium">No photos in QR gallery yet</p>
@@ -990,6 +1053,16 @@ export default function QRUpload() {
       </div>
 
       <Toast toast={toast} onClose={() => setToast(null)} />
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.action || (() => {})}
+        onCancel={closeConfirm}
+        confirmText="Delete"
+      />
+
       {actionLoading.loading && <ActionOverlay message={actionLoading.message} />}
     </DashboardLayout>
   );

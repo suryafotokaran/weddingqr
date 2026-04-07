@@ -450,6 +450,18 @@ export default function GuestEventView() {
         <p className="text-[10px] font-bold text-zinc-300 uppercase tracking-[0.3em]">Created with WeddingQR</p>
       </footer>
 
+      {event?.theme_color && (
+        <style dangerouslySetInnerHTML={{ __html: `
+          .text-teal-600, .text-teal-700, .text-pink-500, .text-pink-600, .text-pink-200 { color: ${event.theme_color} !important; }
+          .bg-teal-50, .bg-teal-100, .bg-pink-50, .bg-pink-100 { background-color: ${event.theme_color}20 !important; }
+          .bg-teal-600, .bg-teal-500, .bg-pink-500 { background-color: ${event.theme_color} !important; }
+          .border-teal-100, .border-teal-500 { border-color: ${event.theme_color}30 !important; }
+          .ring-pink-500\\/20 { --tw-ring-color: ${event.theme_color}33 !important; }
+          .shadow-teal-500\\/20, .shadow-teal-500\\/30, .shadow-pink-500\\/10 { --tw-shadow-color: ${event.theme_color}33 !important; }
+          .silk-gradient { background: linear-gradient(135deg, ${event.theme_color}, ${event.theme_color}dd) !important; }
+        `}} />
+      )}
+
       {event?.allow_screenshot && (
         <style dangerouslySetInnerHTML={{ __html: `
           body {

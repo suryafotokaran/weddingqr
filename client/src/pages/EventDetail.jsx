@@ -8,6 +8,7 @@ import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import UpgradePlan from '../components/UpgradePlan';
 import MonthlyUpgradePlan from '../components/MonthlyUpgradePlan';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ImageIcon,
   CalendarDays, Tag, Images, ArrowLeft, CloudUpload, ArrowUp,
@@ -160,6 +161,12 @@ export default function EventDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
   const [activeTab, setActiveTab] = useState('all');
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
+
+  const triggerConfirm = (title, message, action) => {
+    setConfirmModal({ isOpen: true, title, message, action });
+  };
+  const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
   const [signedUrls, setSignedUrls] = useState({});
   const [subscription, setSubscription] = useState(null);       // active subscription if event is in pool
   const [poolUsedBytes, setPoolUsedBytes] = useState(0);       // total bytes used across subscription events
@@ -303,7 +310,8 @@ export default function EventDetail() {
       try {
         const ext         = item.file.name.split('.').pop();
         const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const storagePath = `${user.id}/${event.id}/${fileName}`;
+        const folderName  = event?.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+        const storagePath = `${user.id}/${folderName}_photoselection/${fileName}`;
 
         // ── Upload to iDrive e2 via presigned PUT URL ──
         await uploadToIDrive(item.file, storagePath);
@@ -415,91 +423,99 @@ export default function EventDetail() {
     }
   };
 
-  const handleDeleteSelected = async () => {
-    if (!window.confirm(`Are you sure you want to delete ${selectedIds.size} photos? This cannot be undone.`)) return;
-    
-    setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos...` });
-    try {
-      const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
-      const storagePaths = selectedPhotos.map(p => p.storage_path);
+  const handleDeleteSelected = () => {
+    triggerConfirm(
+      'Delete Selected Photos',
+      `Are you sure you want to permanently delete ${selectedIds.size} photos? This cannot be undone.`,
+      async () => {
+        closeConfirm();
+        setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos...` });
+        try {
+          const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
+          
+          // 1. Delete from iDrive e2 (only iDrive photos; old Supabase photos skip cleanly)
+          const idrivePaths = selectedPhotos
+            .filter(p => !p.supabase_url?.includes('supabase.co'))
+            .map(p => p.storage_path);
+          if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
 
-      // 1. Delete from iDrive e2 (only iDrive photos; old Supabase photos skip cleanly)
-      const idrivePaths = selectedPhotos
-        .filter(p => !p.supabase_url?.includes('supabase.co'))
-        .map(p => p.storage_path);
-      if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
+          // 2. Delete old Supabase Storage photos (if any still selected)
+          const supaPaths = selectedPhotos
+            .filter(p => p.supabase_url?.includes('supabase.co'))
+            .map(p => p.storage_path);
+          if (supaPaths.length) {
+            await supabase.storage.from('photos').remove(supaPaths);
+          }
 
-      // 2. Delete old Supabase Storage photos (if any still selected)
-      const supaPaths = selectedPhotos
-        .filter(p => p.supabase_url?.includes('supabase.co'))
-        .map(p => p.storage_path);
-      if (supaPaths.length) {
-        await supabase.storage.from('photos').remove(supaPaths);
+          // 3. Delete from Database
+          const { error: dbErr } = await supabase
+            .from('photos')
+            .delete()
+            .in('id', Array.from(selectedIds));
+
+          if (dbErr) throw dbErr;
+
+          // Clear signed URL cache for deleted photos
+          setSignedUrls(prev => {
+            const next = { ...prev };
+            Array.from(selectedIds).forEach(id => delete next[id]);
+            return next;
+          });
+
+          showToast('success', 'Deleted', `${selectedIds.size} photos removed successfully.`);
+          setSelectedIds(new Set());
+          await fetchEvent();
+        } catch (err) {
+          showToast('error', 'Deletion Failed', err.message);
+        } finally {
+          setActionLoading({ loading: false, message: '' });
+        }
       }
-
-      // 3. Delete from Database
-      const { error: dbErr } = await supabase
-        .from('photos')
-        .delete()
-        .in('id', Array.from(selectedIds));
-
-      if (dbErr) throw dbErr;
-
-      // Clear signed URL cache for deleted photos
-      setSignedUrls(prev => {
-        const next = { ...prev };
-        Array.from(selectedIds).forEach(id => delete next[id]);
-        return next;
-      });
-
-      showToast('success', 'Deleted', `${selectedIds.size} photos removed successfully.`);
-      setSelectedIds(new Set());
-      await fetchEvent();
-    } catch (err) {
-      showToast('error', 'Deletion Failed', err.message);
-    } finally {
-      setActionLoading({ loading: false, message: '' });
-    }
+    );
   };
 
   // Clear ALL photos from this event — deletes from storage + DB
-  const handleClearAllPhotos = async () => {
+  const handleClearAllPhotos = () => {
     if (!photos.length) return;
-    if (!window.confirm(`This will permanently delete all ${photos.length} photos from this event and storage. This cannot be undone.`)) return;
+    triggerConfirm(
+      'Clear All Photos',
+      `This will permanently delete all ${photos.length} photos from this event and storage. This cannot be undone.`,
+      async () => {
+        closeConfirm();
+        setActionLoading({ loading: true, message: `Clearing all ${photos.length} photos…` });
+        try {
+          // 1. Delete from R2/iDrive
+          const idrivePaths = photos
+            .filter(p => p.storage_path && !p.supabase_url?.includes('supabase.co'))
+            .map(p => p.storage_path);
+          if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
 
-    setActionLoading({ loading: true, message: `Clearing all ${photos.length} photos…` });
-    try {
-      // 1. Delete from R2/iDrive
-      const idrivePaths = photos
-        .filter(p => p.storage_path && !p.supabase_url?.includes('supabase.co'))
-        .map(p => p.storage_path);
-      if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
+          // 2. Delete old Supabase Storage photos
+          const supaPaths = photos
+            .filter(p => p.storage_path && p.supabase_url?.includes('supabase.co'))
+            .map(p => p.storage_path);
+          if (supaPaths.length) {
+            await supabase.storage.from('photos').remove(supaPaths);
+          }
 
-      // 2. Delete old Supabase Storage photos
-      const supaPaths = photos
-        .filter(p => p.supabase_url?.includes('supabase.co') && p.storage_path)
-        .map(p => p.storage_path);
-      if (supaPaths.length) {
-        await supabase.storage.from('photos').remove(supaPaths);
+          // 3. Delete DB rows
+          const { error: dbErr } = await supabase
+            .from('photos')
+            .delete()
+            .eq('event_id', id);
+
+          if (dbErr) throw dbErr;
+
+          setSignedUrls({});
+          showToast('success', 'Cleared', `All photos have been successfully deleted.`);
+          await fetchEvent(); // refresh
+        } catch (err) {
+          showToast('error', 'Clear Failed', err.message);
+        } finally {
+          setActionLoading({ loading: false, message: '' });
+        }
       }
-
-      // 3. Delete all from DB
-      const { error: dbErr } = await supabase
-        .from('photos')
-        .delete()
-        .eq('event_id', event.id);
-
-      if (dbErr) throw dbErr;
-
-      setSignedUrls({});
-      setSelectedIds(new Set());
-      showToast('success', 'Cleared', `All ${photos.length} photos have been deleted.`);
-      await fetchEvent();
-    } catch (err) {
-      showToast('error', 'Clear Failed', err.message);
-    } finally {
-      setActionLoading({ loading: false, message: '' });
-    }
+    );
   };
 
   const handleDownloadSelected = async () => {
@@ -1069,7 +1085,25 @@ export default function EventDetail() {
         </div>
       </div>
 
-      <Toast toast={toast} onClose={() => setToast(null)} />
+      {toast && (
+        <Toast
+          type={toast.type}
+          title={toast.title}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.action || (() => {})}
+        onCancel={closeConfirm}
+        confirmText="Delete"
+      />
+
       {actionLoading.loading && <ActionOverlay message={actionLoading.message} />}
     </DashboardLayout>
   );

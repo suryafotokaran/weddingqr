@@ -112,7 +112,8 @@ export default function GuestUpload() {
       try {
         const ext = item.file.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const storagePath = `guest/${event.id}/${fileName}`;
+        const folderName = event?.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+        const storagePath = `${folderName}_guestupload/${fileName}`;
 
         await uploadToR2(item.file, storagePath);
 
@@ -185,6 +186,18 @@ export default function GuestUpload() {
       className="min-h-screen flex flex-col"
       style={{ background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 60%, #faf5ff 100%)' }}
     >
+      {event?.theme_color && (
+        <style dangerouslySetInnerHTML={{ __html: `
+          .text-violet-500, .text-violet-600, .text-violet-700 { color: ${event.theme_color} !important; }
+          .bg-violet-50 { background-color: ${event.theme_color}20 !important; }
+          .bg-violet-100 { background-color: ${event.theme_color}33 !important; }
+          .bg-violet-500, .bg-violet-600, .bg-violet-700 { background-color: ${event.theme_color} !important; }
+          .border-violet-200, .border-violet-400, .border-violet-500 { border-color: ${event.theme_color}80 !important; }
+          .shadow-violet-500\\/10, .shadow-violet-500\\/25, .shadow-violet-500\\/30 { --tw-shadow-color: ${event.theme_color}4d !important; }
+          .bg-gradient-to-br { background: linear-gradient(to bottom right, ${event.theme_color}, ${event.theme_color}dd) !important; }
+        `}} />
+      )}
+
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-md border-b border-white/60 px-6 py-5 sticky top-0 z-10">
         <div className="max-w-lg mx-auto flex items-center justify-between">

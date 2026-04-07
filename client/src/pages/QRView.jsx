@@ -388,6 +388,18 @@ export default function QRView() {
         <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.3em]">Powered by WeddingQR</p>
       </footer>
 
+      {event?.theme_color && (
+        <style dangerouslySetInnerHTML={{ __html: `
+          .text-violet-500, .text-violet-600, .text-violet-700 { color: ${event.theme_color} !important; }
+          .bg-violet-50 { background-color: ${event.theme_color}20 !important; }
+          .bg-violet-500, .bg-violet-600, .bg-violet-700 { background-color: ${event.theme_color} !important; }
+          .border-violet-100 { border-color: ${event.theme_color}30 !important; }
+          .ring-violet-500\\/30 { --tw-ring-color: ${event.theme_color}4d !important; }
+          .shadow-violet-500\\/20, .shadow-violet-500\\/25 { --tw-shadow-color: ${event.theme_color}33 !important; }
+          .bg-gradient-to-br { background: linear-gradient(to bottom right, ${event.theme_color}, ${event.theme_color}dd) !important; }
+        `}} />
+      )}
+
       {event?.allow_screenshot && (
         <style dangerouslySetInnerHTML={{ __html: `
           body {
