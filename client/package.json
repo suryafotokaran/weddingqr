@@ -15,6 +15,8 @@
     "@supabase/supabase-js": "^2.100.0",
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/react-query": "^5.95.2",
+    "@vladmandic/face-api": "^1.7.15",
+    "browser-image-compression": "^2.0.2",
     "lucide-react": "^1.1.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.4",

@@ -1,27 +1,21 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
   Zap, Star, Crown, Save, Loader2, CheckCircle2,
-  Gift, User, CalendarDays, HardDrive, FileImage,
-  AlertCircle, Search,
+  Gift, User, CalendarDays, FileImage, AlertCircle, Search,
 } from 'lucide-react';
 
-
 const PLAN_META = {
-  basic:           { icon: Zap,   iconBg: 'bg-zinc-100',  iconColor: 'text-zinc-600',  border: 'border-zinc-200'   },
-  pro:             { icon: Star,  iconBg: 'bg-teal-50',   iconColor: 'text-teal-600',  border: 'border-teal-200'   },
-  premium:         { icon: Crown, iconBg: 'bg-orange-50', iconColor: 'text-orange-600',border: 'border-orange-200' },
-  monthly_starter: { icon: Zap,   iconBg: 'bg-zinc-100',  iconColor: 'text-zinc-600',  border: 'border-zinc-200'   },
-  monthly_pro:     { icon: Star,  iconBg: 'bg-teal-50',   iconColor: 'text-teal-600',  border: 'border-teal-200'   },
-  monthly_elite:   { icon: Crown, iconBg: 'bg-orange-50', iconColor: 'text-orange-600',border: 'border-orange-200' },
+  starter: { icon: Zap,   iconBg: 'bg-zinc-100',  iconColor: 'text-zinc-600',  border: 'border-zinc-200'   },
+  pro:     { icon: Star,  iconBg: 'bg-teal-50',   iconColor: 'text-teal-600',  border: 'border-teal-200'   },
+  premium: { icon: Crown, iconBg: 'bg-orange-50', iconColor: 'text-orange-600', border: 'border-orange-200' },
 };
 
-// Always show these 3 cards — DB data merges on top; zeros shown if DB is empty
 const PLAN_DEFAULTS = [
-  { key: 'basic',   label: 'Starter Plan',      amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, extra_gb_price_paise: 500 },
-  { key: 'pro',     label: 'Professional Plan', amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, extra_gb_price_paise: 500 },
-  { key: 'premium', label: 'Elite Plan',         amount_paise: 0, storage_gb: 0, max_image_size_mb: 0, tagline: '', is_active: false, extra_gb_price_paise: 500 },
+  { key: 'starter', label: 'Starter',  amount_paise: 200000, photos_limit: 5000,  max_image_size_mb: 20, duration_days: 365, tagline: 'Perfect for intimate events',      is_active: true },
+  { key: 'pro',     label: 'Pro',      amount_paise: 350000, photos_limit: 10000, max_image_size_mb: 30, duration_days: 365, tagline: 'Ideal for full wedding coverage',   is_active: true },
+  { key: 'premium', label: 'Premium',  amount_paise: 500000, photos_limit: 20000, max_image_size_mb: 50, duration_days: 365, tagline: 'Maximum capacity for large events', is_active: true },
 ];
 
 function Field({ label, value, onChange, prefix, suffix, type = 'number', min }) {
@@ -47,7 +41,7 @@ function PlanCard({ plan, onSave }) {
   const [form, setForm] = useState({ ...plan });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const meta = PLAN_META[plan.key] ?? PLAN_META.basic;
+  const meta = PLAN_META[plan.key] ?? PLAN_META.starter;
   const Icon = meta.icon;
   const changed = JSON.stringify(form) !== JSON.stringify(plan);
 
@@ -70,19 +64,16 @@ function PlanCard({ plan, onSave }) {
         </div>
         <div>
           <p className="font-bold text-zinc-900">{plan.label}</p>
-          <p className="text-[10px] text-zinc-400 uppercase tracking-widest">{plan.key}</p>
+          <p className="text-[10px] text-zinc-400 uppercase tracking-widest">{plan.key} · yearly</p>
         </div>
       </div>
 
       <div className="space-y-4">
-        <Field label="Price (₹)" prefix="₹" value={Math.round(form.amount_paise / 100)}
+        <Field label="Price (₹ / year)" prefix="₹" value={Math.round(form.amount_paise / 100)}
           onChange={v => set('amount_paise')(v * 100)} min={0} />
-        <Field label="Storage (GB)" suffix="GB" value={form.storage_gb} onChange={set('storage_gb')} min={1} />
+        <Field label="Photo Limit" suffix="photos" value={form.photos_limit} onChange={set('photos_limit')} min={1} />
         <Field label="Max Image Size" suffix="MB / image" value={form.max_image_size_mb} onChange={set('max_image_size_mb')} min={1} />
-        {plan.key === 'premium' && (
-          <Field label="Extra GB Price (₹/GB)" prefix="₹" value={Math.round(form.extra_gb_price_paise / 100)}
-            onChange={v => set('extra_gb_price_paise')(v * 100)} min={1} />
-        )}
+        <Field label="Access Duration" suffix="days" value={form.duration_days} onChange={set('duration_days')} min={1} />
         <Field label="Tagline" type="text" value={form.tagline} onChange={set('tagline')} />
       </div>
 
@@ -115,24 +106,11 @@ function PlanCard({ plan, onSave }) {
   );
 }
 
-const EVENT_TYPES = ['Wedding', 'Engagement', 'Birthday', 'Corporate', 'Anniversary', 'Other'];
-
+// ── User Picker ──────────────────────────────────────────────────────────────
 function UserPicker({ users, value, onChange }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const containerRef = useRef(null);
   const selected = users.find(u => u.id === value);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
@@ -144,8 +122,7 @@ function UserPicker({ users, value, onChange }) {
   });
 
   return (
-    <div className="relative" ref={containerRef}>
-      {/* Trigger */}
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -176,10 +153,8 @@ function UserPicker({ users, value, onChange }) {
         <Search size={15} className="text-zinc-400 shrink-0 ml-auto" />
       </button>
 
-      {/* Dropdown */}
       {open && (
         <div className="absolute z-50 top-full left-0 right-0 mt-2 bg-white rounded-2xl border border-zinc-100 shadow-[0_20px_60px_rgba(26,28,28,0.12)] overflow-hidden">
-          {/* Search box */}
           <div className="p-3 border-b border-zinc-100">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
@@ -193,8 +168,6 @@ function UserPicker({ users, value, onChange }) {
               />
             </div>
           </div>
-
-          {/* User list */}
           <div className="max-h-64 overflow-y-auto">
             {filtered.length === 0 ? (
               <div className="py-8 text-center text-zinc-400 text-sm">No users found</div>
@@ -203,9 +176,7 @@ function UserPicker({ users, value, onChange }) {
                 key={u.id}
                 type="button"
                 onClick={() => { onChange(u.id); setOpen(false); setSearch(''); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 transition-colors ${
-                  u.id === value ? 'bg-teal-50' : ''
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 transition-colors ${u.id === value ? 'bg-teal-50' : ''}`}
               >
                 <img
                   src={`https://ui-avatars.com/api/?name=${encodeURIComponent(u.full_name || u.email)}&background=00685f&color=fff&size=64`}
@@ -235,38 +206,38 @@ function UserPicker({ users, value, onChange }) {
   );
 }
 
-function GrantFreeEvent({ users }) {
-
-  const { session } = useAuth();
-  const [form, setForm] = useState({
-    user_id: '', event_name: '', event_type: 'Wedding',
-    event_date: new Date().toISOString().split('T')[0],
-    storage_gb: 25, max_image_size_mb: 50,
-  });
+// ── Grant Free Trial ─────────────────────────────────────────────────────────
+function GrantFreeTrial({ users }) {
+  const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null); // { success, message }
-
-  const set = (field) => (e) => setForm(f => ({
-    ...f, [field]: e.target ? e.target.value : e,
-  }));
+  const [result, setResult] = useState(null);
 
   const handleGrant = async () => {
-    if (!form.user_id || !form.event_name || !form.event_date) return;
+    if (!userId) return;
     setLoading(true);
     setResult(null);
     try {
-      const { data, error } = await supabase.rpc('admin_grant_free_event', {
-        p_user_id:           form.user_id,
-        p_event_name:        form.event_name,
-        p_event_type:        form.event_type,
-        p_event_date:        form.event_date,
-        p_photos_limit:      99999,
-        p_storage_gb:        Number(form.storage_gb),
-        p_max_image_size_mb: Number(form.max_image_size_mb),
+      // Delete existing free_trial plan if any, then insert new one
+      await supabase.from('user_plans').delete().eq('user_id', userId).eq('plan_key', 'free_trial');
+
+      const startDate = new Date();
+      const endDate   = new Date(startDate.getTime() + 30 * 86400000);
+
+      const { error } = await supabase.from('user_plans').insert({
+        user_id:           userId,
+        plan_key:          'free_trial',
+        photos_limit:      100,
+        max_image_size_mb: 10,
+        duration_days:     30,
+        amount_paise:      0,
+        status:            'active',
+        start_date:        startDate.toISOString(),
+        end_date:          endDate.toISOString(),
       });
+
       if (error) throw error;
-      setResult({ success: true, message: `Free event created successfully! Event ID: ${data}` });
-      setForm(f => ({ ...f, event_name: '', user_id: '' }));
+      setResult({ success: true, message: 'Free trial granted successfully!' });
+      setUserId('');
     } catch (e) {
       setResult({ success: false, message: e.message ?? String(e) });
     } finally {
@@ -274,8 +245,6 @@ function GrantFreeEvent({ users }) {
     }
   };
 
-  const inputCls = "w-full px-3 py-2.5 rounded-xl border border-zinc-200 bg-zinc-50 text-sm font-medium text-zinc-900 focus:outline-none focus:border-teal-500 focus:bg-white transition-all";
-  
   return (
     <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgba(26,28,28,0.04)] border border-zinc-100 p-8">
       <div className="flex items-center gap-3 mb-6">
@@ -283,8 +252,8 @@ function GrantFreeEvent({ users }) {
           <Gift size={20} className="text-amber-600" />
         </div>
         <div>
-          <h3 className="font-bold text-zinc-900">Grant Free Event</h3>
-          <p className="text-xs text-zinc-400">Create a free event directly for a specific user</p>
+          <h3 className="font-bold text-zinc-900">Grant Free Trial</h3>
+          <p className="text-xs text-zinc-400">Grants a 30-day free trial (100 photos) to a user</p>
         </div>
       </div>
 
@@ -297,108 +266,44 @@ function GrantFreeEvent({ users }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* User picker */}
-        <div className="md:col-span-2">
-          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">
-            Select User
-          </label>
-          <UserPicker
-            users={users}
-            value={form.user_id}
-            onChange={id => setForm(f => ({ ...f, user_id: id }))}
-          />
-        </div>
-
-
-        {/* Event Name */}
-        <div>
-          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Event Name</label>
-          <input type="text" placeholder="e.g. Priya & Rahul Wedding"
-            value={form.event_name} onChange={set('event_name')}
-            className={inputCls} />
-        </div>
-
-        {/* Event Type */}
-        <div>
-          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Event Type</label>
-          <select value={form.event_type} onChange={set('event_type')} className={inputCls}>
-            {EVENT_TYPES.map(t => <option key={t}>{t}</option>)}
-          </select>
-        </div>
-
-        {/* Event Date */}
-        <div>
-          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">
-            <CalendarDays size={11} className="inline mr-1" />Event Date
-          </label>
-          <input type="date" value={form.event_date} onChange={set('event_date')} className={inputCls} />
-        </div>
-
-
-
-        {/* Storage */}
-        <div>
-          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">
-            <HardDrive size={11} className="inline mr-1" />Storage (GB)
-          </label>
-          <input type="number" min={1} value={form.storage_gb}
-            onChange={e => setForm(f => ({ ...f, storage_gb: Number(e.target.value) }))}
-            className={inputCls} />
-        </div>
-
-        {/* Max image size */}
-        <div>
-          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">
-            <FileImage size={11} className="inline mr-1" />Max Image Size (MB)
-          </label>
-          <input type="number" min={1} value={form.max_image_size_mb}
-            onChange={e => setForm(f => ({ ...f, max_image_size_mb: Number(e.target.value) }))}
-            className={inputCls} />
-        </div>
+      <div className="mb-4">
+        <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Select User</label>
+        <UserPicker users={users} value={userId} onChange={setUserId} />
       </div>
 
       <button
         onClick={handleGrant}
-        disabled={loading || !form.user_id || !form.event_name}
-        className="mt-6 flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold silk-gradient text-white shadow-md hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        disabled={loading || !userId}
+        className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold silk-gradient text-white shadow-md hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? <Loader2 size={16} className="animate-spin" /> : <Gift size={16} />}
-        {loading ? 'Creating…' : 'Grant Free Event'}
+        {loading ? 'Granting…' : 'Grant Free Trial'}
       </button>
     </div>
   );
 }
 
+// ── Main Plans Page ──────────────────────────────────────────────────────────
 export default function Plans() {
   const { session } = useAuth();
-  const [configs, setConfigs] = useState([]);
-  const [monthlyConfigs, setMonthlyConfigs] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [configs, setConfigs] = useState(PLAN_DEFAULTS);
+  const [users, setUsers]   = useState([]);
   const [loading, setLoading] = useState(true);
-
-  const MONTHLY_DEFAULTS = [
-    { key: 'monthly_starter', label: 'Starter Monthly', amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
-    { key: 'monthly_pro',     label: 'Pro Monthly',     amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
-    { key: 'monthly_elite',   label: 'Elite Monthly',   amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
-  ];
 
   useEffect(() => {
     if (!session?.access_token) return;
     (async () => {
       setLoading(true);
-      const [{ data: planData }, { data: usersData }, { data: monthlyData }] = await Promise.all([
-        supabase.from('plan_configs').select('*').order('amount_paise'),
+      const [{ data: planData }, { data: usersData }] = await Promise.all([
+        supabase.from('yearly_plan_configs').select('*').order('amount_paise'),
         supabase.rpc('admin_get_users'),
-        supabase.from('monthly_plan_configs').select('*').order('amount_paise'),
       ]);
-      const dbMap = Object.fromEntries((planData ?? []).map(p => [p.key, p]));
-      const merged = PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d);
-      setConfigs(merged);
 
-      const mdbMap = Object.fromEntries((monthlyData ?? []).map(p => [p.key, p]));
-      const mmerged = MONTHLY_DEFAULTS.map(d => mdbMap[d.key] ? { ...d, ...mdbMap[d.key] } : d);
-      setMonthlyConfigs(mmerged);
+      if (planData?.length) {
+        const dbMap = Object.fromEntries(planData.map(p => [p.key, p]));
+        const merged = PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d);
+        setConfigs(merged);
+      }
 
       setUsers(Array.isArray(usersData) ? usersData : []);
       setLoading(false);
@@ -406,43 +311,21 @@ export default function Plans() {
   }, [session?.access_token]);
 
   const handleSave = async (form) => {
-    await supabase.rpc('admin_update_plan_config', {
-      p_key:                  form.key,
-      p_label:                form.label,
-      p_amount_paise:         form.amount_paise,
-      p_photos_limit:         99999,
-      p_storage_gb:           form.storage_gb,
-      p_max_image_size_mb:    form.max_image_size_mb,
-      p_tagline:              form.tagline,
-      p_is_active:            form.is_active,
-      p_extra_gb_price_paise: form.extra_gb_price_paise,
+    await supabase.rpc('admin_update_yearly_plan_config', {
+      p_key:               form.key,
+      p_label:             form.label,
+      p_amount_paise:      form.amount_paise,
+      p_photos_limit:      form.photos_limit,
+      p_max_image_size_mb: form.max_image_size_mb,
+      p_duration_days:     form.duration_days,
+      p_tagline:           form.tagline,
+      p_is_active:         form.is_active,
     });
-    const { data } = await supabase.from('plan_configs').select('*').order('amount_paise');
-    const dbMap = Object.fromEntries((data ?? []).map(p => [p.key, p]));
-    const merged = PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d);
-    setConfigs(merged);
-  };
-
-  const handleMonthlySave = async (form) => {
-    await supabase.from('monthly_plan_configs').upsert({
-      key:               form.key,
-      label:             form.label,
-      amount_paise:      form.amount_paise,
-      storage_gb:        form.storage_gb,
-      max_image_size_mb: form.max_image_size_mb,
-      tagline:           form.tagline,
-      is_active:         form.is_active,
-      updated_at:        new Date().toISOString(),
-    }, { onConflict: 'key' });
-    const { data } = await supabase.from('monthly_plan_configs').select('*').order('amount_paise');
-    const mdbMap = Object.fromEntries((data ?? []).map(p => [p.key, p]));
-    const MONTHLY_DEFAULTS = [
-      { key: 'monthly_starter', label: 'Starter Monthly', amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
-      { key: 'monthly_pro',     label: 'Pro Monthly',     amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
-      { key: 'monthly_elite',   label: 'Elite Monthly',   amount_paise: 0, storage_gb: 0, max_image_size_mb: 50, tagline: '', is_active: true },
-    ];
-    const mmerged = MONTHLY_DEFAULTS.map(d => mdbMap[d.key] ? { ...d, ...mdbMap[d.key] } : d);
-    setMonthlyConfigs(mmerged);
+    const { data } = await supabase.from('yearly_plan_configs').select('*').order('amount_paise');
+    if (data) {
+      const dbMap = Object.fromEntries(data.map(p => [p.key, p]));
+      setConfigs(PLAN_DEFAULTS.map(d => dbMap[d.key] ? { ...d, ...dbMap[d.key] } : d));
+    }
   };
 
   return (
@@ -450,7 +333,7 @@ export default function Plans() {
       <header className="mb-10">
         <p className="text-amber-700 font-bold tracking-[0.05em] text-[10px] uppercase mb-2">Admin · Config</p>
         <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900">Plans</h1>
-        <p className="text-sm text-zinc-500 mt-1">Edit plan pricing & limits — changes reflect instantly on the client Pricing page</p>
+        <p className="text-sm text-zinc-500 mt-1">Edit yearly plan pricing, photo limits &amp; access duration — changes reflect on the client Pricing page</p>
       </header>
 
       {loading ? (
@@ -459,10 +342,12 @@ export default function Plans() {
         </div>
       ) : (
         <div className="space-y-10">
-          {/* Plan Config Cards */}
+          {/* Yearly Plan Cards */}
           <section>
-            <h2 className="text-lg font-bold text-zinc-900 mb-1">Per-Event Plan Configuration</h2>
-            <p className="text-xs text-zinc-400 mb-4">One-time payment · Each event gets its own dedicated storage</p>
+            <h2 className="text-lg font-bold text-zinc-900 mb-1">Yearly Plan Configuration</h2>
+            <p className="text-xs text-zinc-400 mb-4">
+              One-time purchase · Shared photo quota across all events · Duration is snapshotted at time of purchase
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {configs.map(plan => (
                 <PlanCard key={plan.key} plan={plan} onSave={handleSave} />
@@ -470,26 +355,10 @@ export default function Plans() {
             </div>
           </section>
 
-          {/* Monthly Plan Cards */}
+          {/* Grant Free Trial */}
           <section>
-            <h2 className="text-lg font-bold text-zinc-900 mb-1">Monthly Subscription Configuration</h2>
-            <p className="text-xs text-zinc-400 mb-4">Monthly recurring · Shared storage pool across all events</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {monthlyConfigs.map(plan => (
-                <PlanCard
-                  key={plan.key}
-                  plan={{ ...plan, extra_gb_price_paise: undefined }}
-                  onSave={handleMonthlySave}
-                  hideExtraGb
-                />
-              ))}
-            </div>
-          </section>
-
-          {/* Grant Free Event */}
-          <section>
-            <h2 className="text-lg font-bold text-zinc-900 mb-4">Grant Free Event</h2>
-            <GrantFreeEvent users={users} />
+            <h2 className="text-lg font-bold text-zinc-900 mb-4">Grant Free Trial</h2>
+            <GrantFreeTrial users={users} />
           </section>
         </div>
       )}

@@ -4,18 +4,10 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  ArrowLeft, HardDrive, ArrowUp, Tag, CalendarDays,
-  Images, QrCode, ChevronRight, Trash2
+  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, ArrowUp
 } from 'lucide-react';
-import { deleteFromIDrive } from '../lib/s3';
+import { deleteFromR2 } from '../lib/s3';
 import ConfirmModal from '../components/ConfirmModal';
-
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function SkeletonBlock({ className = '' }) {
   return (
@@ -32,9 +24,10 @@ export default function EventLanding() {
 
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [subscription, setSubscription] = useState(null);
-  const [poolUsedBytes, setPoolUsedBytes] = useState(0);
-  const [photos, setPhotos] = useState([]);
+  const [photoCount, setPhotoCount] = useState(0);
+  const [storagePaths, setStoragePaths] = useState([]);
+  const [activePlan, setActivePlan] = useState(null);
+  const [globalPhotoCount, setGlobalPhotoCount] = useState(0);
   const [hoveredCard, setHoveredCard] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
@@ -43,7 +36,7 @@ export default function EventLanding() {
   const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
-    const fetchEvent = async () => {
+    const fetchData = async () => {
       setLoading(true);
       const { data: ev } = await supabase
         .from('events')
@@ -54,58 +47,28 @@ export default function EventLanding() {
 
       const { data: ph } = await supabase
         .from('photos')
-        .select('size_bytes, storage_path')
+        .select('storage_path')
         .eq('event_id', id);
-      setPhotos(ph ?? []);
+      setPhotoCount((ph ?? []).length);
+      setStoragePaths((ph ?? []).map(p => p.storage_path).filter(Boolean));
 
       setLoading(false);
     };
-    fetchEvent();
+    fetchData();
   }, [id]);
 
+  // Fetch global quota from user plan
   useEffect(() => {
-    if (!event?.subscription_id) {
-      setSubscription(null);
-      setPoolUsedBytes(0);
-      return;
-    }
-    supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('id', event.subscription_id)
-      .single()
-      .then(({ data: sub }) => {
-        if (!sub) return;
-        setSubscription(sub);
-        supabase
-          .from('events')
-          .select('id')
-          .eq('subscription_id', sub.id)
-          .then(({ data: poolEvents }) => {
-            if (!poolEvents?.length) return;
-            supabase
-              .from('photos')
-              .select('size_bytes')
-              .in('event_id', poolEvents.map(e => e.id))
-              .then(({ data: poolPhotos }) => {
-                const total = (poolPhotos ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-                setPoolUsedBytes(total);
-              });
-          });
-      });
-  }, [event?.subscription_id]);
-
-  const isPooled = !!event?.subscription_id;
-  const storageUsedBytes = isPooled
-    ? poolUsedBytes
-    : photos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-  const limitGb = isPooled
-    ? (subscription?.storage_gb ?? event?.storage_gb ?? 1)
-    : (event?.storage_gb ?? 1);
-  const storageLimitBytes = limitGb * 1024 * 1024 * 1024;
-  const storagePercent = Math.min(100, (storageUsedBytes / storageLimitBytes) * 100);
-  const quotaWarning = storagePercent >= 90 && storagePercent < 100;
-  const quotaFull = storagePercent >= 100;
+    if (!userData?.user) return;
+    const uid = userData.user.id;
+    Promise.all([
+      supabase.rpc('get_user_active_plan', { p_user_id: uid }),
+      supabase.rpc('get_user_photo_count', { p_user_id: uid }),
+    ]).then(([planRes, countRes]) => {
+      setActivePlan(planRes.data?.[0] ?? null);
+      setGlobalPhotoCount(countRes.data ?? 0);
+    });
+  }, [userData]);
 
   if (loading) {
     return (
@@ -154,21 +117,10 @@ export default function EventLanding() {
         closeConfirm();
         setIsDeleting(true);
         try {
-          // 1. Delete from Cloudflare/iDrive
-          if (photos.length > 0) {
-            const idrivePaths = photos.map(p => p.storage_path).filter(Boolean);
-            if (idrivePaths.length > 0) {
-              await deleteFromIDrive(idrivePaths);
-            }
-          }
-
-          // 2. Delete photos from DB
+          if (storagePaths.length > 0) await deleteFromR2(storagePaths);
           await supabase.from('photos').delete().eq('event_id', id);
-
-          // 3. Delete event from DB
           const { error } = await supabase.from('events').delete().eq('id', id);
           if (error) throw error;
-
           navigate('/studio');
         } catch (err) {
           console.error(err);
@@ -183,13 +135,14 @@ export default function EventLanding() {
     <DashboardLayout>
       <div className="max-w-5xl mx-auto py-6">
 
-        {/* Back */}
-        <button
-          onClick={() => navigate('/studio')}
-          className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-teal-700 mb-6 transition-colors"
-        >
-          <ArrowLeft size={16} /> Back to Dashboard
-        </button>
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
+          <button onClick={() => navigate('/studio')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Dashboard</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <button onClick={() => navigate('/events')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Events</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <span className="text-zinc-900 font-bold truncate">{event.name}</span>
+        </nav>
 
         {/* Event Header — same as EventDetail */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-10">
@@ -206,33 +159,41 @@ export default function EventLanding() {
               </div>
             </div>
 
-            <div className="flex gap-4 items-stretch">
-              {/* Storage quota */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
-                <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
-                  <HardDrive size={14} className="text-teal-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest">
-                    {isPooled ? 'Shared Pool' : 'Storage'}
-                  </p>
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <p className="text-lg font-bold text-zinc-900">{formatBytes(storageUsedBytes)}</p>
-                  <p className="text-[11px] font-semibold text-zinc-400">/ {limitGb} GB</p>
-                </div>
-                {isPooled && (
-                  <p className="text-[10px] text-zinc-400 leading-tight">across all events</p>
-                )}
-                <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-teal-500'}`}
-                    style={{ width: `${storagePercent}%` }}
-                  />
-                </div>
-              </div>
+            <div className="flex gap-3 items-stretch">
+              {/* Global quota card with progress bar */}
+              {activePlan && (() => {
+                const limit   = activePlan.photos_limit;
+                const percent = Math.min(100, (globalPhotoCount / limit) * 100);
+                const isFull  = globalPhotoCount >= limit;
+                const isWarn  = percent >= 90 && !isFull;
+                return (
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[190px]">
+                    <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
+                      <Images size={14} className={isFull ? 'text-red-500' : isWarn ? 'text-amber-500' : 'text-teal-600'} />
+                      <p className="text-[10px] font-bold uppercase tracking-widest">Total Photos Used</p>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <p className={`text-2xl font-black ${isFull ? 'text-red-600' : 'text-zinc-900'}`}>
+                        {globalPhotoCount.toLocaleString()}
+                      </p>
+                      <p className="text-[11px] font-semibold text-zinc-400">/ {limit.toLocaleString()}</p>
+                    </div>
+                    <div className="mt-2 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          isFull ? 'bg-red-500' : isWarn ? 'bg-amber-400' : 'bg-teal-500'
+                        }`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-1">across all events</p>
+                  </div>
+                );
+              })()}
 
-              {/* Upgrade button */}
+              {/* Upgrade Plan — functionality TBD */}
               <button
-                onClick={() => navigate(isPooled ? '/pricing?tab=monthly' : `/events/${id}/photos`)}
+                onClick={() => navigate('/pricing')}
                 className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50/40 hover:bg-teal-50 hover:border-teal-400 hover:shadow-md transition-all active:scale-95"
               >
                 <ArrowUp size={14} className="mb-[-2px]" />
@@ -264,6 +225,12 @@ export default function EventLanding() {
                 <Images size={26} className="text-white" />
               </div>
 
+              {event.is_public && (
+                <span className="absolute top-0 right-0 flex items-center gap-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" /> Live
+                </span>
+              )}
+
               <h2 className="text-xl font-extrabold text-zinc-900 mb-2 tracking-tight">Photo Selection</h2>
               <p className="text-sm text-zinc-500 leading-relaxed mb-6">
                 Upload, manage, and organize all photos for this event. Allow guests to view and select their favorites.
@@ -292,9 +259,11 @@ export default function EventLanding() {
               </div>
 
               {/* Live Badge */}
-              <span className="absolute top-0 right-0 flex items-center gap-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" /> Live
-              </span>
+              {event.is_qr_live && (
+                <span className="absolute top-0 right-0 flex items-center gap-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" /> Live
+                </span>
+              )}
 
               <h2 className="text-xl font-extrabold text-zinc-900 mb-2 tracking-tight">QR Upload</h2>
               <p className="text-sm text-zinc-500 leading-relaxed mb-6">

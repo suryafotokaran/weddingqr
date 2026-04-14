@@ -2,19 +2,20 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../lib/supabase';
-import { uploadToIDrive, getSignedPhotoUrls, deleteFromIDrive, buildIDriveRefUrl } from '../lib/s3';
+import { uploadToR2, getSignedPhotoUrls, deleteFromR2, buildR2RefUrl } from '../lib/s3';
+import imageCompression from 'browser-image-compression';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
-import UpgradePlan from '../components/UpgradePlan';
-import MonthlyUpgradePlan from '../components/MonthlyUpgradePlan';
 import ConfirmModal from '../components/ConfirmModal';
 import {
   ArrowLeft, QrCode, Download, Copy, Check, RefreshCw,
   Images, CalendarDays, Tag, Loader2, ExternalLink,
   Upload, X, CheckCircle, AlertCircle, ImageIcon, CloudUpload,
-  Eye, EyeOff, Trash2, Square, CheckSquare, MonitorOff, HardDrive, ArrowUp, Palette
+  Eye, EyeOff, Trash2, Square, CheckSquare, MonitorOff, Palette,
+  FolderOpen,
 } from 'lucide-react';
+import * as faceapi from '@vladmandic/face-api';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -24,7 +25,7 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function SkeletonBlock({ className = "" }) {
+function SkeletonBlock({ className = '' }) {
   return (
     <div className={`relative overflow-hidden bg-zinc-200 rounded-xl ${className}`}>
       <div className="absolute inset-0 skeleton-shimmer" />
@@ -36,10 +37,7 @@ function EventSkeleton() {
   return (
     <DashboardLayout>
       <div className="max-w-5xl mx-auto py-6 animate-pulse">
-        {/* Back button skeleton */}
         <div className="w-32 h-4 bg-zinc-200 rounded-full mb-6" />
-
-        {/* Header skeleton */}
         <div className="bg-white rounded-2xl p-7 mb-6 border border-zinc-100">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="space-y-3">
@@ -53,18 +51,11 @@ function EventSkeleton() {
             <SkeletonBlock className="w-40 h-16 md:w-48" />
           </div>
         </div>
-
-        {/* Grid skeleton */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <SkeletonBlock className="h-48" />
           <SkeletonBlock className="h-48" />
         </div>
-
         <div className="bg-white rounded-2xl p-7 border border-zinc-100">
-          <div className="flex gap-6 border-b border-zinc-100 mb-8 pb-4">
-            <SkeletonBlock className="w-24 h-4" />
-            <SkeletonBlock className="w-24 h-4" />
-          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
               <SkeletonBlock key={i} className="aspect-square" />
@@ -72,61 +63,20 @@ function EventSkeleton() {
           </div>
         </div>
       </div>
-
       <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes shimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-        .skeleton-shimmer {
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
-          animation: shimmer 1.5s infinite;
-        }
+        @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+        .skeleton-shimmer { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent); animation: shimmer 1.5s infinite; }
       `}} />
     </DashboardLayout>
   );
 }
 
-function UploadItem({ item }) {
-  const statusIcon = {
-    pending:   <Loader2 size={16} className="text-zinc-400 animate-spin" />,
-    uploading: <Loader2 size={16} className="text-violet-500 animate-spin" />,
-    done:      <CheckCircle size={16} className="text-green-500" />,
-    error:     <AlertCircle size={16} className="text-red-400" />,
-  };
-
-  return (
-    <div className="flex items-center gap-3 p-3 rounded-xl bg-zinc-50 border border-zinc-100">
-      <div className="w-10 h-10 rounded-lg bg-zinc-200 flex items-center justify-center shrink-0 overflow-hidden">
-        {item.previewUrl
-          ? <img src={item.previewUrl} className="w-full h-full object-cover" alt="" />
-          : <ImageIcon size={18} className="text-zinc-400" />
-        }
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-zinc-800 truncate">{item.file.name}</p>
-        <p className="text-xs text-zinc-400">{formatBytes(item.file.size)}</p>
-        {item.status === 'uploading' && (
-          <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-violet-500 rounded-full transition-all duration-300"
-              style={{ width: `${item.progress}%` }}
-            />
-          </div>
-        )}
-        {item.error && <p className="text-xs text-red-500 mt-0.5">{item.error}</p>}
-      </div>
-      {statusIcon[item.status]}
-    </div>
-  );
-}
-
-function ActionOverlay({ message = "Processing..." }) {
+function ActionOverlay({ message = 'Processing...' }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
       <div className="absolute inset-0 bg-white/40 backdrop-blur-md" />
-      <div className="relative bg-white rounded-3xl shadow-2xl shadow-zinc-200 border border-zinc-100 p-8 flex flex-col items-center gap-4 min-w-[240px] animate-in zoom-in-95 duration-300">
-        <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+      <div className="relative bg-white rounded-3xl shadow-2xl border border-zinc-100 p-8 flex flex-col items-center gap-4 min-w-[240px] animate-in zoom-in-95 duration-300">
+        <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center shadow-lg">
           <Loader2 className="w-8 h-8 text-white animate-spin" />
         </div>
         <div className="text-center">
@@ -138,38 +88,65 @@ function ActionOverlay({ message = "Processing..." }) {
   );
 }
 
+// ── Compression options ──────────────────────────────────────────────────────
+const getCompressionOptions = (maxMb) => ({
+  maxSizeMB:        Math.min(maxMb, 2),
+  maxWidthOrHeight: 3840,
+  useWebWorker:     true,
+  preserveExifData: true,
+});
+
 export default function QRUpload() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
 
-  const [event, setEvent] = useState(null);
-  const [photos, setPhotos] = useState([]);
-  const [allPhotos, setAllPhotos] = useState([]);
-  const [subscription, setSubscription] = useState(null);
-  const [poolUsedBytes, setPoolUsedBytes] = useState(0);
-  const [showUpgrade, setShowUpgrade] = useState(false);
-  const [showMonthlyUpgrade, setShowMonthlyUpgrade] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const [signedUrls, setSignedUrls] = useState({});
-  const [uploading, setUploading] = useState([]);
-  const [isDragging, setIsDragging] = useState(false);
-  const [toast, setToast] = useState(null);
-  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
+  const [event,        setEvent]        = useState(null);
+  const [photos,       setPhotos]       = useState([]);
+  const [activePlan,   setActivePlan]   = useState(null);
+  const [photoCount,   setPhotoCount]   = useState(0);
+  const [loading,      setLoading]      = useState(true);
+  const [copied,       setCopied]       = useState(false);
+  const [signedUrls,   setSignedUrls]   = useState({});
+  const [stagedFiles,  setStagedFiles]  = useState([]);
+  const [uploadState,  setUploadState]  = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+  const [isDragging,   setIsDragging]   = useState(false);
+  const [toast,        setToast]        = useState(null);
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null, confirmText: 'Delete', isDestructive: true });
+  const [selectedIds,  setSelectedIds]  = useState(new Set());
+  const [actionLoading,setActionLoading]= useState({ loading: false, message: '' });
+  const [showGallery,  setShowGallery]  = useState(false);
+  const [quotaModal,   setQuotaModal]   = useState({ show: false, canUpload: 0, trying: 0, excess: 0 });
 
-  const triggerConfirm = (title, message, action) => {
-    setConfirmModal({ isOpen: true, title, message, action });
+  const fileInputRef      = useRef(null);
+  const folderInputRef    = useRef(null);
+  const cancelUploadRef   = useRef(false);
+  const [selectedFolderName, setSelectedFolderName] = useState(null);
+
+  const handleFolderPick = async () => {
+    if ('showDirectoryPicker' in window) {
+      try {
+        const dirHandle = await window.showDirectoryPicker();
+        const files = [];
+        for await (const entry of dirHandle.values()) {
+          if (entry.kind === 'file') {
+            const file = await entry.getFile();
+            if (file.type.startsWith('image/')) files.push(file);
+          }
+        }
+        if (files.length) {
+          setSelectedFolderName(dirHandle.name);
+          stageFiles(files);
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') console.error(err);
+      }
+    } else {
+      folderInputRef.current?.click();
+    }
   };
-  const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
-  const [showGallery, setShowGallery] = useState(false);
-  const fileInputRef = useRef(null);
-  const qrRef = useRef(null);
 
-  // QR view URL - this is where guests will land after scanning
   const qrViewUrl = `${window.location.origin}/qr/${id}`;
 
   const showToast = (type, title, message) => {
@@ -177,7 +154,11 @@ export default function QRUpload() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  // Generate signed URLs for photos
+  const triggerConfirm = (title, message, action, confirmText = 'Delete', isDestructive = true) =>
+    setConfirmModal({ isOpen: true, title, message, action, confirmText, isDestructive });
+  const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
+
+  // Signed URLs
   useEffect(() => {
     if (!photos.length) return;
     getSignedPhotoUrls(photos).then(urls => {
@@ -185,194 +166,215 @@ export default function QRUpload() {
     });
   }, [photos]);
 
-  const getPhotoUrl = useCallback((photo) => {
-    return signedUrls[photo.id] || photo.supabase_url || null;
-  }, [signedUrls]);
+  const getPhotoUrl = useCallback((photo) => signedUrls[photo.id] || photo.supabase_url || null, [signedUrls]);
 
-  /* ── Fetch event + QR gallery photos ── */
+  /* ── Fetch event, photos, plan, models ── */
   const fetchData = useCallback(async () => {
-    const { data: ev } = await supabase
-      .from('events')
-      .select('*')
-      .eq('id', id)
-      .single();
+    if (!user) return;
+
+    const [{ data: ev }] = await Promise.all([
+      supabase.from('events').select('*').eq('id', id).single(),
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+    ]);
+
     setEvent(ev);
 
-    // Fetch ALL photos — used for storage calculation
     const { data: allPh } = await supabase
       .from('photos')
       .select('*')
       .eq('event_id', id)
       .order('created_at', { ascending: false });
-    
-    const allPhArr = allPh ?? [];
-    setAllPhotos(allPhArr);
 
-    // Extract photos uploaded for QR gallery (source = 'qr_gallery')
-    setPhotos(allPhArr.filter(p => p.source === 'qr_gallery'));
+    setPhotos((allPh ?? []).filter(p => p.source === 'qr_gallery'));
+
+    // Fetch user's active plan + global photo count
+    const [planRes, countRes] = await Promise.all([
+      supabase.rpc('get_user_active_plan', { p_user_id: user.id }),
+      supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
+    ]);
+
+    setActivePlan(planRes.data?.[0] ?? null);
+    setPhotoCount(countRes.data ?? 0);
     setLoading(false);
-  }, [id]);
+  }, [id, user]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // If event has a subscription_id, fetch subscription data + pool usage
-  useEffect(() => {
-    if (!event?.subscription_id) {
-      setSubscription(null);
-      setPoolUsedBytes(0);
-      return;
-    }
-    supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('id', event.subscription_id)
-      .single()
-      .then(({ data: sub }) => {
-        if (!sub) return;
-        setSubscription(sub);
-
-        // Fetch all events in this subscription pool, then sum their photo sizes
-        supabase
-          .from('events')
-          .select('id')
-          .eq('subscription_id', sub.id)
-          .then(({ data: poolEvents }) => {
-            if (!poolEvents?.length) return;
-            // Count ALL photos (host + guest) for pool storage
-            supabase
-              .from('photos')
-              .select('size_bytes')
-              .in('event_id', poolEvents.map(e => e.id))
-              .then(({ data: poolPhotos }) => {
-                const total = (poolPhotos ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-                setPoolUsedBytes(total);
-              });
-          });
-      });
-  }, [event?.subscription_id]);
-
-  /* ── Upload photos to QR gallery ── */
-  const uploadFiles = useCallback(async (files) => {
+  /* ── Stage files ── */
+  const stageFiles = useCallback(async (files) => {
     if (!user || !event) return;
 
-    // Subscription-pool-aware storage limit check
-    const isPooled = !!event.subscription_id;
-    const limitGb = isPooled ? (subscription?.storage_gb ?? event.storage_gb ?? 1) : (event.storage_gb ?? 1);
-    const storageUsed = isPooled ? poolUsedBytes : allPhotos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-    let pendingBytes = 0;
-
-    const maxFileSizeMb = event.max_image_size_mb || 50;
-    const maxFileSize = maxFileSizeMb * 1024 * 1024;
-
-    const validFiles = [];
-    for (const f of files) {
-      if (f.size > maxFileSize) {
-        showToast('error', 'File too large', `"${f.name}" exceeds the ${maxFileSizeMb} MB limit.`);
-        continue;
-      }
-      if (!f.type.startsWith('image/')) {
-        showToast('error', 'Invalid file', `"${f.name}" is not an image.`);
-        continue;
-      }
-
-      const storageLimit = limitGb * 1024 * 1024 * 1024;
-      if (storageUsed + pendingBytes + f.size > storageLimit) {
-        showToast('error', 'Storage limit reached', `Adding "${f.name}" would exceed your ${limitGb} GB limit.`);
-        if (!isPooled) setShowUpgrade(true);
-        break;
-      }
-      pendingBytes += f.size;
-      validFiles.push(f);
-    }
-
+    const validFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
     if (!validFiles.length) return;
 
-    const newItems = validFiles.map(f => ({
-      id: Math.random().toString(36).slice(2),
-      file: f,
-      status: 'pending',
-      progress: 0,
-      error: null,
-      previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
-    }));
+    setStagedFiles(prev => {
+      const existingNames = new Set([
+        ...photos.map(p => p.file_name),
+        ...prev.map(s => s.file.name),
+      ]);
+      const uniqueFiles = validFiles.filter(f => !existingNames.has(f.name));
+      const dupeCount   = validFiles.length - uniqueFiles.length;
+      if (dupeCount > 0) {
+        setTimeout(() => showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`), 0);
+      }
+      const newItems = uniqueFiles.map(f => ({
+        id:         Math.random().toString(36).slice(2),
+        file:       f,
+        previewUrl: URL.createObjectURL(f),
+      }));
+      return [...prev, ...newItems];
+    });
+  }, [user, event, photos]);
 
-    setUploading(prev => [...newItems, ...prev]);
+  const removeStagedFile = (id) => setStagedFiles(prev => prev.filter(f => f.id !== id));
 
-    for (const item of newItems) {
-      setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'uploading' } : u));
+  /* ── Upload stash with compression ── */
+  const startUpload = async () => {
+    if (!stagedFiles.length || !user || !event) return;
+
+    // Quota validation
+    if (planLimit !== null) {
+      const remaining = Math.max(0, planLimit - photoCount);
+      if (stagedFiles.length > remaining) {
+        setQuotaModal({
+          show:      true,
+          canUpload: remaining,
+          trying:    stagedFiles.length,
+          excess:    stagedFiles.length - remaining,
+        });
+        return;
+      }
+    }
+
+    cancelUploadRef.current = false;
+    let cancelled = false;
+    const maxMb = activePlan?.max_image_size_mb || 20;
+
+    // ── Phase 1: Compress all images first ──────────────────────────────────
+    const compressedItems = [];
+    for (let i = 0; i < stagedFiles.length; i++) {
+      if (cancelUploadRef.current) { cancelled = true; break; }
+      const item = stagedFiles[i];
+      const pct  = Math.round((i / stagedFiles.length) * 100);
+      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: pct, message: item.file.name });
+      try {
+        const compressed = await imageCompression(item.file, getCompressionOptions(maxMb));
+        compressedItems.push({ ...item, compressed });
+      } catch (err) {
+        console.error('Compression failed for', item.file.name, err);
+        compressedItems.push({ ...item, compressed: item.file }); // fall back to original
+      }
+      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round(((i + 1) / stagedFiles.length) * 100), message: item.file.name });
+    }
+
+    if (cancelled) {
+      cancelUploadRef.current = false;
+      setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+      setStagedFiles([]);
+      setSelectedFolderName(null);
+      return;
+    }
+
+    // ── Phase 2: Upload all compressed images ───────────────────────────────
+    const remainingStash = [...stagedFiles];
+    let uploaded = 0;
+
+    for (let i = 0; i < compressedItems.length; i++) {
+      if (cancelUploadRef.current) { cancelled = true; break; }
+      const item = compressedItems[i];
+      const pct  = Math.round((i / compressedItems.length) * 100);
+      setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: pct, message: item.file.name });
+
+      // Skip if a photo with the same name was already uploaded
+      const alreadyUploaded = photos.some(p => p.file_name === item.file.name);
+      if (alreadyUploaded) {
+        const idx = remainingStash.findIndex(s => s.id === item.id);
+        if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
+        continue;
+      }
 
       try {
-        const ext = item.file.name.split('.').pop();
-        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const folderName = event?.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
-        const storagePath = `${folderName}_qrupload/${fileName}`;
+        const ext         = item.file.name.split('.').pop();
+        const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const folderName  = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+        const storagePath = `${user.id}/${folderName}/qrupload/${fileName}`;
 
-        // Upload to iDrive
-        await uploadToIDrive(item.file, storagePath);
+        await uploadToR2(item.compressed, storagePath);
+        const refUrl = buildR2RefUrl(storagePath);
 
-        const refUrl = buildIDriveRefUrl(storagePath);
-
-        // Record in DB with source = 'qr_gallery'
-        const { error: dbErr } = await supabase.from('photos').insert({
-          event_id: event.id,
-          user_id: user.id,
+        const { data: insertedPhoto, error: dbErr } = await supabase.from('photos').insert({
+          event_id:     event.id,
+          user_id:      user.id,
           storage_path: storagePath,
-          file_name: item.file.name,
-          size_bytes: item.file.size,
+          file_name:    item.file.name,
+          size_bytes:   item.compressed.size,
           supabase_url: refUrl,
-          source: 'qr_gallery',
-        });
+          source:       'qr_gallery',
+        }).select('id').single();
 
         if (dbErr) throw new Error(dbErr.message);
 
-        setUploading(prev =>
-          prev.map(u => u.id === item.id ? { ...u, status: 'done', progress: 100 } : u),
-        );
+        // Face embeddings
+        try {
+          const img        = await faceapi.bufferToImage(item.file);
+          const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true).withFaceDescriptors();
+          if (detections?.length > 0) {
+            const embeds = detections.map(det => ({
+              photo_id:  insertedPhoto.id,
+              embedding: `[${Array.from(det.descriptor).join(',')}]`,
+            }));
+            await supabase.from('face_embeddings').insert(embeds);
+          }
+        } catch (faceErr) {
+          console.error('Face processing failed for', item.file.name, faceErr);
+        }
+
+        // Remove uploaded item from staged stash
+        const idx = remainingStash.findIndex(s => s.id === item.id);
+        if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
+        uploaded++;
+        setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round(((i + 1) / compressedItems.length) * 100), message: item.file.name });
+
       } catch (err) {
-        setUploading(prev =>
-          prev.map(u => u.id === item.id ? { ...u, status: 'error', error: err.message } : u),
-        );
+        console.error('Upload error:', err);
+        showToast('error', 'Upload failed', `Failed to upload ${item.file.name}: ${err.message}`);
       }
     }
 
-    await fetchData();
-    setTimeout(() => {
-      setUploading(prev => prev.filter(u => u.status !== 'done'));
-    }, 3000);
-  }, [user, event, allPhotos, poolUsedBytes, subscription, fetchData]);
+    cancelUploadRef.current = false;
+    setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
 
-  const handleDrop = useCallback((e) => { e.preventDefault(); setIsDragging(false); uploadFiles(Array.from(e.dataTransfer.files)); }, [uploadFiles]);
-  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = () => setIsDragging(false);
-  const handleFilePick = (e) => uploadFiles(Array.from(e.target.files));
+    if (cancelled) {
+      setStagedFiles([]);
+      setSelectedFolderName(null);
+    }
 
-  // Subscription-pool-aware storage metrics
-  const isPooled           = !!event?.subscription_id;
-  const storageUsedBytes   = isPooled ? poolUsedBytes : allPhotos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-  const limitGb            = isPooled ? (subscription?.storage_gb ?? event?.storage_gb ?? 1) : (event?.storage_gb ?? 1);
-  const storageLimitBytes  = limitGb * 1024 * 1024 * 1024;
-  const storagePercent     = Math.min(100, (storageUsedBytes / storageLimitBytes) * 100);
-  const quotaWarning       = storagePercent >= 90 && storagePercent < 100;
-  const quotaFull          = storagePercent >= 100;
-
-  const handleUpgraded = async (newStorageGb) => {
-    showToast('success', 'Plan Upgraded!', `Storage upgraded to ${newStorageGb} GB.`);
-    setShowUpgrade(false);
-    await fetchData();
+    if (uploaded > 0) {
+      if (!cancelled) setSelectedFolderName(null);
+      showToast('success', cancelled ? 'Upload Paused' : 'Upload Complete', `${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded successfully.`);
+      await fetchData();
+    }
   };
 
-  /* ── Toggle QR Live status ── */
+  const handleDrop      = useCallback((e) => { e.preventDefault(); setIsDragging(false); stageFiles(Array.from(e.dataTransfer.files)); }, [stageFiles]);
+  const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
+  const handleFilePick  = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
+
+  // Quota info
+  const planLimit    = activePlan?.photos_limit ?? null;
+  const quotaPercent = planLimit ? Math.min(100, (photoCount / planLimit) * 100) : 0;
+  const quotaFull    = planLimit ? photoCount >= planLimit : false;
+  const quotaWarning = planLimit ? quotaPercent >= 90 && !quotaFull : false;
+
+  /* ── Event Settings ── */
   const updateEventSetting = async (key, value, successTitle, successMsg) => {
     if (!event) return;
     setActionLoading({ loading: true, message: 'Updating...' });
     try {
-      const { error } = await supabase
-        .from('events')
-        .update({ [key]: value })
-        .eq('id', id);
-
+      const { error } = await supabase.from('events').update({ [key]: value }).eq('id', id);
       if (error) throw error;
       showToast('success', successTitle, successMsg);
       await fetchData();
@@ -383,37 +385,11 @@ export default function QRUpload() {
     }
   };
 
-  const handleToggleLive = () => {
-    const nextValue = !event.is_qr_live;
-    updateEventSetting(
-      'is_qr_live',
-      nextValue,
-      nextValue ? 'QR Link Enabled' : 'QR Link Disabled',
-      nextValue ? 'Guests can now view the QR gallery.' : 'QR gallery access has been disabled.'
-    );
-  };
+  const handleToggleLive       = () => updateEventSetting('is_qr_live', !event.is_qr_live, event.is_qr_live ? 'QR Disabled' : 'QR Enabled', event.is_qr_live ? 'Gallery hidden.' : 'Guests can now view the gallery.');
+  const handleToggleDownload   = () => updateEventSetting('allow_download', !event.allow_download, 'Downloads Updated', '');
+  const handleToggleScreenshot = () => updateEventSetting('allow_screenshot', !event.allow_screenshot, 'Screenshot Protection Updated', '');
 
-  const handleToggleDownload = () => {
-    const next = !event.allow_download;
-    updateEventSetting(
-      'allow_download', 
-      next, 
-      next ? 'Downloads Enabled' : 'Downloads Disabled', 
-      next ? 'Guests can now download photos from the QR gallery.' : 'Guest downloads have been disabled.'
-    );
-  };
-
-  const handleToggleScreenshot = () => {
-    const next = !event.allow_screenshot;
-    updateEventSetting(
-      'allow_screenshot', 
-      next, 
-      next ? 'Protection Enabled' : 'Protection Disabled', 
-      next ? 'Screenshot deterrents have been applied to guest view.' : 'Screenshot protection has been removed.'
-    );
-  };
-
-  /* ── Copy QR link ── */
+  /* ── Copy QR ── */
   const handleCopy = () => {
     navigator.clipboard.writeText(qrViewUrl);
     setCopied(true);
@@ -421,23 +397,19 @@ export default function QRUpload() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  /* ── Download QR as PNG ── */
+  /* ── Download QR ── */
   const handleDownloadQR = () => {
     const svg = document.getElementById('event-qr-svg');
     if (!svg) return;
-
     const canvas = document.createElement('canvas');
-    const size = 400;
-    canvas.width = size;
-    canvas.height = size;
+    canvas.width = 400; canvas.height = 400;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, size, size);
-
+    ctx.fillRect(0, 0, 400, 400);
     const svgData = new XMLSerializer().serializeToString(svg);
     const img = new Image();
     img.onload = () => {
-      ctx.drawImage(img, 0, 0, size, size);
+      ctx.drawImage(img, 0, 0, 400, 400);
       const a = document.createElement('a');
       a.download = `${event?.name ?? 'event'}-qr.png`;
       a.href = canvas.toDataURL('image/png');
@@ -446,56 +418,30 @@ export default function QRUpload() {
     img.src = `data:image/svg+xml;base64,${btoa(svgData)}`;
   };
 
-  /* ── Selection handlers ── */
-  const toggleSelect = (photoId) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(photoId)) next.delete(photoId);
-      else next.add(photoId);
-      return next;
-    });
-  };
-
+  /* ── Selection ── */
+  const toggleSelect   = (photoId) => setSelectedIds(prev => { const n = new Set(prev); n.has(photoId) ? n.delete(photoId) : n.add(photoId); return n; });
   const handleSelectAll = () => {
-    const allSelected = photos.every(p => selectedIds.has(p.id));
-    if (allSelected) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(photos.map(p => p.id)));
-    }
+    const allSel = photos.every(p => selectedIds.has(p.id));
+    setSelectedIds(allSel ? new Set() : new Set(photos.map(p => p.id)));
   };
 
-  /* ── Delete selected photos ── */
+  /* ── Delete selected ── */
   const handleDeleteSelected = () => {
     triggerConfirm(
       'Delete Selected Photos',
-      `Are you sure you want to permanently delete ${selectedIds.size} photos? This cannot be undone.`,
+      `Permanently delete ${selectedIds.size} photos? This cannot be undone.`,
       async () => {
         closeConfirm();
-        setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos...` });
+        setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos…` });
         try {
-          const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
+          const selPhotos = photos.filter(p => selectedIds.has(p.id));
+          const paths = selPhotos.filter(p => !p.supabase_url?.includes('supabase.co')).map(p => p.storage_path);
+          if (paths.length) await deleteFromR2(paths);
 
-          // Delete from iDrive
-          const idrivePaths = selectedPhotos
-            .filter(p => !p.supabase_url?.includes('supabase.co'))
-            .map(p => p.storage_path);
-          if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
-
-          // Delete from DB
-          const { error: dbErr } = await supabase
-            .from('photos')
-            .delete()
-            .in('id', Array.from(selectedIds));
-
+          const { error: dbErr } = await supabase.from('photos').delete().in('id', Array.from(selectedIds));
           if (dbErr) throw dbErr;
 
-          setSignedUrls(prev => {
-            const next = { ...prev };
-            Array.from(selectedIds).forEach(id => delete next[id]);
-            return next;
-          });
-
+          setSignedUrls(prev => { const n = { ...prev }; Array.from(selectedIds).forEach(id => delete n[id]); return n; });
           showToast('success', 'Deleted', `${selectedIds.size} photos removed.`);
           setSelectedIds(new Set());
           await fetchData();
@@ -508,29 +454,32 @@ export default function QRUpload() {
     );
   };
 
-  if (loading) {
-    return <EventSkeleton />;
-  }
-
-  if (!event) {
-    return (
-      <DashboardLayout>
-        <div className="text-center py-20 text-zinc-500">Event not found.</div>
-      </DashboardLayout>
-    );
-  }
+  if (loading) return <EventSkeleton />;
+  if (!event) return <DashboardLayout><div className="text-center py-20 text-zinc-500">Event not found.</div></DashboardLayout>;
 
   return (
     <DashboardLayout>
       <div className="max-w-5xl mx-auto py-6">
 
-        {/* Back */}
+        {/* Back button */}
         <button
           onClick={() => navigate(`/events/${id}`)}
-          className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-violet-700 mb-6 transition-colors"
+          className="flex items-center gap-2 text-sm font-semibold text-zinc-500 hover:text-violet-700 mb-5 transition-colors group"
         >
-          <ArrowLeft size={16} /> Back to Event
+          <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
+          Back to Event
         </button>
+
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
+          <button onClick={() => navigate('/studio')} className="hover:text-violet-700 hover:underline transition-colors shrink-0">Dashboard</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <button onClick={() => navigate('/events')} className="hover:text-violet-700 hover:underline transition-colors shrink-0">Events</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <button onClick={() => navigate(`/events/${id}`)} className="hover:text-violet-700 hover:underline transition-colors truncate max-w-[150px]">{event.name}</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <span className="text-zinc-900 font-bold shrink-0">QR Management</span>
+        </nav>
 
         {/* Page Header */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-6 border border-zinc-50">
@@ -547,152 +496,72 @@ export default function QRUpload() {
               </div>
             </div>
 
-            {/* Photo count and Storage */}
+            {/* Photo count + plan quota */}
             <div className="flex gap-4 items-stretch">
               <div className="flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-2xl px-6 py-4">
                 <Images size={20} className="text-violet-500" />
                 <div>
                   <p className="text-2xl font-black text-violet-700">{photos.length}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-violet-400">Photos</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-violet-400">QR Photos</p>
                 </div>
               </div>
 
-              {/* Storage quota */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
-                <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
-                  <HardDrive size={14} className="text-violet-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest">
-                    {isPooled ? 'Shared Pool' : 'Storage'}
-                  </p>
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <p className="text-lg font-bold text-zinc-900">{formatBytes(storageUsedBytes)}</p>
-                  <p className="text-[11px] font-semibold text-zinc-400">/ {limitGb} GB</p>
-                </div>
-                {isPooled && (
+              {/* Global quota badge */}
+              {activePlan && (
+                <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
+                  <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
+                    <Images size={14} className="text-violet-600" />
+                    <p className="text-[10px] font-bold uppercase tracking-widest">Plan Quota</p>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <p className="text-lg font-bold text-zinc-900">{photoCount.toLocaleString()}</p>
+                    <p className="text-[11px] font-semibold text-zinc-400">/ {planLimit?.toLocaleString()}</p>
+                  </div>
                   <p className="text-[10px] text-zinc-400 leading-tight">across all events</p>
-                )}
-                <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-violet-500'}`}
-                    style={{ width: `${storagePercent}%` }}
-                  />
+                  <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-violet-500'}`}
+                      style={{ width: `${quotaPercent}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
-
-              {/* Upgrade button — hidden for subscription pool events */}
-              {!showUpgrade && !isPooled && (
-                <button
-                  onClick={() => setShowUpgrade(true)}
-                  className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-violet-200 text-violet-700 bg-violet-50/40 hover:bg-violet-50 hover:border-violet-400 hover:shadow-md transition-all active:scale-95"
-                >
-                  <ArrowUp size={14} className="mb-[-2px]" />
-                  <span>Upgrade Plan</span>
-                </button>
-              )}
-
-              {/* Upgrade button for subscription pool events */}
-              {!showMonthlyUpgrade && isPooled && (
-                <button
-                  onClick={() => setShowMonthlyUpgrade(true)}
-                  className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-violet-200 text-violet-700 bg-violet-50/40 hover:bg-violet-50 hover:border-violet-400 hover:shadow-md transition-all active:scale-95"
-                >
-                  <ArrowUp size={14} className="mb-[-2px]" />
-                  <span>Upgrade Plan</span>
-                </button>
               )}
             </div>
           </div>
         </div>
 
-        {/* Quota full banner */}
-        {quotaFull && !showUpgrade && (
+        {/* Quota banners */}
+        {quotaFull && (
           <div className="flex items-center justify-between gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
             <div>
-              <p className="text-sm font-bold text-red-700">📛 Storage limit reached</p>
+              <p className="text-sm font-bold text-red-700">📛 Photo limit reached</p>
               <p className="text-xs text-red-500 mt-0.5">
-                {isPooled
-                  ? `Your ${limitGb} GB shared pool is full. Upgrade your monthly plan for more storage.`
-                  : `You've used all ${limitGb} GB. Upgrade to continue uploading.`
-                }
+                You've used all {planLimit?.toLocaleString()} photos in your plan. Contact support to discuss options.
               </p>
             </div>
-            {isPooled ? (
-              <button
-                onClick={() => navigate('/pricing?tab=monthly')}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-violet-600 text-white shadow hover:opacity-90 active:scale-95 transition-all"
-              >
-                <ArrowUp size={12} /> Upgrade Plan
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowUpgrade(true)}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-violet-600 text-white shadow hover:opacity-90 active:scale-95 transition-all"
-              >
-                <ArrowUp size={12} /> Upgrade Now
-              </button>
-            )}
+          </div>
+        )}
+        {quotaWarning && !quotaFull && (
+          <div className="flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
+            <p className="text-sm font-bold text-amber-700">⚠️ Approaching photo limit — {photoCount.toLocaleString()} of {planLimit?.toLocaleString()} used</p>
           </div>
         )}
 
-        {/* Quota warning banner */}
-        {quotaWarning && !quotaFull && !showUpgrade && (
-          <div className="flex items-center justify-between gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
-            <div>
-              <p className="text-sm font-bold text-amber-700">⚠️ Storage almost full</p>
-              <p className="text-xs text-amber-600 mt-0.5">
-                {formatBytes(storageUsedBytes)} of {limitGb} GB used
-                {isPooled ? ' — shared pool running low.' : ' — consider upgrading soon.'}
-              </p>
-            </div>
-            {isPooled ? (
-              <button
-                onClick={() => navigate('/pricing?tab=monthly')}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
-              >
-                <ArrowUp size={12} /> Upgrade Plan
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowUpgrade(true)}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
-              >
-                <ArrowUp size={12} /> Add More
-              </button>
-            )}
+        {/* Live Status Banner */}
+        <div className={`flex items-center gap-3 p-4 rounded-xl mb-6 ${event.is_qr_live ? 'bg-green-50 border border-green-100' : 'bg-zinc-50 border border-zinc-100'}`}>
+          <div className={`w-3 h-3 rounded-full shrink-0 ${event.is_qr_live ? 'bg-green-500 animate-pulse' : 'bg-zinc-300'}`} />
+          <div>
+            <p className={`text-sm font-bold ${event.is_qr_live ? 'text-green-700' : 'text-zinc-500'}`}>
+              {event.is_qr_live ? 'Gallery is LIVE' : 'Gallery is OFFLINE'}
+            </p>
+            <p className="text-[10px] text-zinc-400">
+              {event.is_qr_live ? 'Guests can access via QR scan' : 'Toggle on to make it accessible'}
+            </p>
           </div>
-        )}
-
-        {/* Upgrade Panels */}
-        {showMonthlyUpgrade && isPooled && subscription && (
-          <MonthlyUpgradePlan
-            subscription={subscription}
-            user={user}
-            onUpgraded={(newGb) => {
-              setShowMonthlyUpgrade(false);
-              showToast('success', 'Plan Upgraded!', `Monthly pool storage upgraded to ${newGb} GB.`);
-              supabase
-                .from('subscriptions')
-                .select('*')
-                .eq('id', event.subscription_id)
-                .single()
-                .then(({ data }) => { if (data) setSubscription(data); });
-            }}
-            onClose={() => setShowMonthlyUpgrade(false)}
-          />
-        )}
-
-        {showUpgrade && !isPooled && (
-          <UpgradePlan
-            event={event}
-            user={user}
-            onUpgraded={handleUpgraded}
-            onClose={() => setShowUpgrade(false)}
-          />
-        )}
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* ── Live Toggle Card ── */}
+          {/* Live Toggle Card */}
           <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 border border-zinc-50 flex flex-col justify-between">
             <div>
               <div className="flex items-start justify-between mb-4">
@@ -707,8 +576,6 @@ export default function QRUpload() {
                     </p>
                   </div>
                 </div>
-
-                {/* Toggle Switch */}
                 <button
                   onClick={handleToggleLive}
                   className={`w-14 h-7 rounded-full p-1 transition-all duration-300 ${event.is_qr_live ? 'bg-green-500' : 'bg-zinc-200'}`}
@@ -719,32 +586,15 @@ export default function QRUpload() {
 
               <p className="text-sm text-zinc-500 mb-6">
                 {event.is_qr_live
-                  ? 'Anyone with the QR code or link can view and download photos from this gallery.'
+                  ? 'Anyone with the QR code or link can view photos from this gallery.'
                   : 'The QR gallery is currently hidden. Enable it to allow guests to view photos.'}
               </p>
 
-              {/* Status indicator */}
-              <div className={`flex items-center gap-3 p-4 rounded-xl ${event.is_qr_live ? 'bg-green-50 border border-green-100' : 'bg-zinc-50 border border-zinc-100'}`}>
-                <div className={`w-3 h-3 rounded-full ${event.is_qr_live ? 'bg-green-500 animate-pulse' : 'bg-zinc-300'}`} />
-                <div>
-                  <p className={`text-sm font-bold ${event.is_qr_live ? 'text-green-700' : 'text-zinc-500'}`}>
-                    {event.is_qr_live ? 'Gallery is LIVE' : 'Gallery is OFFLINE'}
-                  </p>
-                  <p className="text-[10px] text-zinc-400">
-                    {event.is_qr_live ? 'Guests can access via QR scan' : 'Toggle on to make it accessible'}
-                  </p>
-                </div>
-              </div>
             </div>
 
-            {/* Info */}
             <div className="mt-6 pt-4 border-t border-zinc-100">
-              <p className="text-[10px] text-zinc-400 leading-relaxed mb-4">
-                <strong className="text-zinc-500">Note:</strong> Guests can only VIEW and DOWNLOAD photos. They cannot upload to this gallery.
-              </p>
-
-              {/* Permissions Toggles */}
               <div className="space-y-4">
+                {/* Allow Download */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${event.allow_download ? 'bg-violet-50 text-violet-600' : 'bg-zinc-100 text-zinc-400'}`}>
@@ -755,7 +605,7 @@ export default function QRUpload() {
                       <p className="text-[10px] text-zinc-400">Guests can download gallery photos</p>
                     </div>
                   </div>
-                  <button 
+                  <button
                     onClick={handleToggleDownload}
                     className={`w-10 h-5 rounded-full p-1 transition-all duration-300 ${event.allow_download ? 'bg-violet-500' : 'bg-zinc-200'}`}
                   >
@@ -763,6 +613,7 @@ export default function QRUpload() {
                   </button>
                 </div>
 
+                {/* Screenshot Protection */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${event.allow_screenshot ? 'bg-red-50 text-red-600' : 'bg-zinc-100 text-zinc-400'}`}>
@@ -773,7 +624,7 @@ export default function QRUpload() {
                       <p className="text-[10px] text-zinc-400">Deter guests from taking screenshots</p>
                     </div>
                   </div>
-                  <button 
+                  <button
                     onClick={handleToggleScreenshot}
                     className={`w-10 h-5 rounded-full p-1 transition-all duration-300 ${event.allow_screenshot ? 'bg-red-500' : 'bg-zinc-200'}`}
                   >
@@ -781,6 +632,7 @@ export default function QRUpload() {
                   </button>
                 </div>
 
+                {/* Theme Color */}
                 <div className="flex items-center justify-between pt-2 border-t border-zinc-50">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
@@ -792,26 +644,24 @@ export default function QRUpload() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <input 
+                    <input
                       type="text"
                       value={event.theme_color || '#5b21b6'}
                       onChange={(e) => setEvent({ ...event, theme_color: e.target.value })}
                       onBlur={(e) => {
-                        let finalVal = event.theme_color || '#5b21b6';
-                        if (!finalVal.startsWith('#')) finalVal = '#' + finalVal;
-                        if (finalVal !== event.theme_color) setEvent({ ...event, theme_color: finalVal });
-                        updateEventSetting('theme_color', finalVal, 'Theme Swapped', 'Color successfully changed.');
+                        let v = event.theme_color || '#5b21b6';
+                        if (!v.startsWith('#')) v = '#' + v;
+                        updateEventSetting('theme_color', v, 'Theme Updated', 'Color changed.');
                       }}
                       className="w-20 px-2 py-1.5 text-xs font-mono uppercase bg-zinc-50 border border-zinc-200 rounded outline-none focus:border-violet-500 text-zinc-700"
-                      placeholder="#5B21B6"
                       maxLength={7}
                     />
                     <div className="relative w-8 h-8 rounded-full overflow-hidden border border-zinc-200 shadow-sm shrink-0">
-                      <input 
+                      <input
                         type="color"
                         value={event.theme_color || '#5b21b6'}
                         onChange={(e) => setEvent({ ...event, theme_color: e.target.value })}
-                        onBlur={(e) => updateEventSetting('theme_color', e.target.value, 'Theme Swapped', 'Color successfully changed.')}
+                        onBlur={(e) => updateEventSetting('theme_color', e.target.value, 'Theme Updated', 'Color changed.')}
                         className="absolute -top-2 -left-2 w-12 h-12 p-0 cursor-pointer"
                       />
                     </div>
@@ -821,18 +671,15 @@ export default function QRUpload() {
             </div>
           </div>
 
-          {/* ── QR Code Card ── */}
+          {/* QR Code Card */}
           <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 border border-zinc-50">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center text-violet-600">
-                  <QrCode size={16} />
-                </div>
-                <h2 className="font-bold text-zinc-900">Scan to View</h2>
+            <div className="flex items-center gap-2 mb-6">
+              <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center text-violet-600">
+                <QrCode size={16} />
               </div>
+              <h2 className="font-bold text-zinc-900">Scan to View</h2>
             </div>
 
-            {/* QR */}
             <div className="flex justify-center mb-6">
               <div className="p-5 bg-white rounded-2xl border-2 border-violet-100 shadow-lg shadow-violet-500/10">
                 <QRCodeSVG
@@ -851,8 +698,7 @@ export default function QRUpload() {
               Guests scan this QR to view and download photos from this gallery.
             </p>
 
-            {/* Actions */}
-            <div className="flex gap-3">
+            <div className="flex gap-3 mb-4">
               <button
                 onClick={handleDownloadQR}
                 className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-violet-200 text-violet-700 text-sm font-bold hover:bg-violet-50 transition-all active:scale-95"
@@ -861,27 +707,16 @@ export default function QRUpload() {
               </button>
               <button
                 onClick={handleCopy}
-                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-violet-600 text-white text-sm font-bold hover:bg-violet-700 transition-all active:scale-95 shadow-lg shadow-violet-500/20"
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-violet-600 text-white text-sm font-bold hover:bg-violet-700 transition-all active:scale-95 shadow-lg"
               >
                 {copied ? <Check size={16} /> : <Copy size={16} />}
                 {copied ? 'Copied!' : 'Copy Link'}
               </button>
             </div>
 
-            {/* Link preview */}
-            <div className="mt-4 flex items-center gap-2">
-              <input
-                readOnly
-                value={qrViewUrl}
-                className="flex-1 bg-zinc-50 border border-zinc-100 rounded-xl px-4 py-2.5 text-xs font-mono text-zinc-500 outline-none"
-              />
-              <a
-                href={qrViewUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2.5 rounded-xl bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 transition-all"
-                title="Open view page"
-              >
+            <div className="flex items-center gap-2">
+              <input readOnly value={qrViewUrl} className="flex-1 bg-zinc-50 border border-zinc-100 rounded-xl px-4 py-2.5 text-xs font-mono text-zinc-500 outline-none" />
+              <a href={qrViewUrl} target="_blank" rel="noopener noreferrer" className="p-2.5 rounded-xl bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 transition-all">
                 <ExternalLink size={16} />
               </a>
             </div>
@@ -893,7 +728,7 @@ export default function QRUpload() {
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
-          onClick={() => !quotaFull && fileInputRef.current?.click()}
+          onClick={() => !quotaFull && uploadState.phase === 'idle' && fileInputRef.current?.click()}
           className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-200 mb-6 ${
             quotaFull
               ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60'
@@ -908,85 +743,179 @@ export default function QRUpload() {
             </div>
             <div>
               <p className="text-base font-bold text-zinc-800">
-                {quotaFull ? 'Quota reached — upgrade to upload more' : isDragging ? 'Drop photos here' : 'Upload photos to QR Gallery'}
+                {quotaFull ? 'Photo limit reached' : uploadState.phase !== 'idle' ? (uploadState.phase === 'compressing' ? 'Compressing photos…' : 'Uploading photos…') : isDragging ? 'Drop photos here' : 'Select photos to upload'}
               </p>
-              <p className="text-sm text-zinc-500 mt-1">or click to browse · Max 50 MB per photo</p>
+              <p className="text-sm text-zinc-500 mt-1">Images are automatically compressed before upload</p>
             </div>
             {!quotaFull && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md active:scale-95 transition-all"
-              >
-                <Upload size={14} className="inline mr-1.5" />
-                Select Photos
-              </button>
+              <div className="flex gap-3" onClick={e => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md active:scale-95 transition-all flex items-center gap-2"
+                >
+                  <Upload size={14} /> Select Photos
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFolderPick}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-violet-700 border-2 border-violet-200 bg-white shadow transition-all active:scale-95 hover:border-violet-400 max-w-[180px]"
+                >
+                  <FolderOpen size={14} className="shrink-0" />
+                  <span className="truncate">{selectedFolderName ?? 'Select Folder'}</span>
+                </button>
+              </div>
             )}
           </div>
+
+          <input ref={fileInputRef} type="file" multiple accept="image/*" className="hidden" onChange={handleFilePick} />
           <input
-            ref={fileInputRef}
+            ref={folderInputRef}
             type="file"
             multiple
-            accept="image/*"
             className="hidden"
-            onChange={handleFilePick}
+            // @ts-ignore
+            webkitdirectory="true"
+            onChange={(e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; }}
           />
         </div>
 
-        {/* Upload Queue */}
-        {uploading.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-zinc-900">Uploading Photos</h3>
-              <button onClick={() => setUploading([])} className="text-zinc-400 hover:text-zinc-600 transition-colors">
-                <X size={16} />
-              </button>
+        {/* Upload Progress */}
+        {uploadState.phase !== 'idle' && uploadState.total > 0 && (
+          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-6 animate-in fade-in duration-300 border border-violet-100">
+
+            {/* Phase tabs */}
+            <div className="flex items-center gap-2 mb-5">
+              {[
+                { key: 'compressing', label: 'Compressing', color: 'amber' },
+                { key: 'uploading',   label: 'Uploading',   color: 'violet' },
+              ].map(({ key, label, color }) => {
+                const isActive = uploadState.phase === key;
+                const isDone   = key === 'compressing' && uploadState.phase === 'uploading';
+                return (
+                  <div key={key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                    isActive
+                      ? color === 'amber'
+                        ? 'bg-amber-50 border-amber-200 text-amber-700'
+                        : 'bg-violet-50 border-violet-200 text-violet-700'
+                      : isDone
+                      ? 'bg-green-50 border-green-200 text-green-600'
+                      : 'bg-zinc-50 border-zinc-200 text-zinc-400'
+                  }`}>
+                    {isDone
+                      ? <CheckCircle size={12} />
+                      : isActive
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <div className="w-3 h-3 rounded-full border-2 border-current opacity-40" />
+                    }
+                    {label}
+                  </div>
+                );
+              })}
+              <div className="ml-auto">
+                <button
+                  onClick={() => { cancelUploadRef.current = true; }}
+                  className="px-4 py-1.5 text-xs font-bold text-red-500 border border-red-200 hover:bg-red-50 rounded-full transition-all active:scale-95"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-            <div className="space-y-2">
-              {uploading.map(item => (
-                <UploadItem key={item.id} item={item} />
+
+            {/* Current file */}
+            <p className="text-xs text-zinc-400 truncate mb-3">
+              {uploadState.phase === 'compressing' ? 'Compressing' : 'Uploading'}: <span className="text-zinc-600 font-medium">{uploadState.message}</span>
+            </p>
+
+            {/* Progress bar */}
+            <div className="relative h-3 rounded-full overflow-hidden bg-zinc-100 border border-zinc-200/60">
+              <div
+                className={`absolute top-0 bottom-0 left-0 rounded-full transition-all duration-300 ${
+                  uploadState.phase === 'compressing'
+                    ? 'bg-gradient-to-r from-amber-400 to-orange-400'
+                    : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
+                }`}
+                style={{ width: `${uploadState.percent}%` }}
+              />
+            </div>
+
+            {/* Counter + percent */}
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-xs text-zinc-400">
+                {uploadState.current} <span className="text-zinc-300">/ {uploadState.total}</span> photos
+              </p>
+              <p className={`text-sm font-black ${uploadState.phase === 'compressing' ? 'text-amber-500' : 'text-violet-600'}`}>
+                {uploadState.percent}%
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Staged Files */}
+        {uploadState.phase === 'idle' && stagedFiles.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 mb-6 relative animate-in fade-in duration-300">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-zinc-900 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-black">{stagedFiles.length}</span>
+                  Photos Ready to Upload
+                  {planLimit !== null && (stagedFiles.length + photoCount > planLimit) && (
+                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-black animate-in fade-in duration-200">
+                      <X size={10} strokeWidth={3} />
+                      {stagedFiles.length + photoCount - planLimit} to remove
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">Will be compressed automatically before uploading.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => { setStagedFiles([]); setSelectedFolderName(null); }} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-red-500 hover:bg-zinc-50 rounded-xl transition-all">Clear All</button>
+                <button onClick={startUpload} className="flex items-center gap-2 px-6 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white shadow-md text-sm font-bold active:scale-95 transition-all">
+                  <CloudUpload size={16} /> Upload Now
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[300px] overflow-y-auto pr-2">
+              {stagedFiles.map(staged => (
+                <div key={staged.id} className="relative aspect-square rounded-xl bg-zinc-100 overflow-hidden group">
+                  <div className="absolute top-1 right-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => { e.stopPropagation(); removeStagedFile(staged.id); }} className="w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-500 transition-colors">
+                      <X size={12} />
+                    </button>
+                  </div>
+                  {staged.previewUrl
+                    ? <img src={staged.previewUrl} alt="" className="w-full h-full object-cover" />
+                    : <ImageIcon className="w-full h-full p-4 text-zinc-300" />
+                  }
+                </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Photo Gallery */}
+        {/* Gallery */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
               <h2 className="text-xl font-bold tracking-tight text-zinc-900">QR Gallery Photos</h2>
               {showGallery && photos.length > 0 && (
-                <button
-                  onClick={handleSelectAll}
-                  className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-violet-600 transition-colors"
-                >
+                <button onClick={handleSelectAll} className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-violet-600 transition-colors">
                   {photos.every(p => selectedIds.has(p.id)) ? <CheckSquare size={14} /> : <Square size={14} />}
                   {photos.every(p => selectedIds.has(p.id)) ? 'Deselect All' : 'Select All'}
                 </button>
               )}
             </div>
-
-            {/* Selection Actions */}
             {showGallery && selectedIds.size > 0 && (
-              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-zinc-500 mr-2">{selectedIds.size} Selected</span>
-                <button
-                  onClick={handleDeleteSelected}
-                  className="p-2 rounded-lg bg-zinc-50 text-zinc-600 hover:bg-red-50 hover:text-red-600 transition-all shadow-sm"
-                  title="Delete Selected"
-                >
+                <button onClick={handleDeleteSelected} className="p-2 rounded-lg bg-zinc-50 text-zinc-600 hover:bg-red-50 hover:text-red-600 transition-all shadow-sm" title="Delete Selected">
                   <Trash2 size={16} />
                 </button>
               </div>
             )}
-
-            {/* Refresh */}
             {showGallery && photos.length > 0 && selectedIds.size === 0 && (
-              <button
-                onClick={fetchData}
-                className="p-2 rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-violet-50 transition-all"
-                title="Refresh"
-              >
+              <button onClick={fetchData} className="p-2 rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-violet-50 transition-all" title="Refresh">
                 <RefreshCw size={16} />
               </button>
             )}
@@ -995,12 +924,9 @@ export default function QRUpload() {
           {!showGallery ? (
             <div className="flex flex-col items-center justify-center py-20 bg-zinc-50/50 rounded-xl border border-zinc-100">
               <Images size={40} className="text-violet-200 mb-4" />
-              <p className="text-zinc-600 font-medium mb-1">Gallery preview is hidden</p>
-              <p className="text-xs text-zinc-400 mb-6 max-w-sm text-center">To save bandwidth, photos are not loaded automatically. Click below to view the uploaded photos.</p>
-              <button
-                onClick={() => setShowGallery(true)}
-                className="px-6 py-2.5 rounded-xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 transition-all shadow-md active:scale-95 flex items-center gap-2"
-              >
+              <p className="text-zinc-600 font-medium mb-1">Gallery preview hidden</p>
+              <p className="text-xs text-zinc-400 mb-6 max-w-sm text-center">Click below to load uploaded photos.</p>
+              <button onClick={() => setShowGallery(true)} className="px-6 py-2.5 rounded-xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 transition-all shadow-md active:scale-95 flex items-center gap-2">
                 <Eye size={16} /> View Photos
               </button>
             </div>
@@ -1018,18 +944,12 @@ export default function QRUpload() {
                   className={`group relative aspect-square rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${selectedIds.has(photo.id) ? 'ring-4 ring-violet-500/20' : 'bg-zinc-100'}`}
                 >
                   {getPhotoUrl(photo) ? (
-                    <img
-                      src={getPhotoUrl(photo)}
-                      alt={photo.file_name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      loading="lazy"
-                    />
+                    <img src={getPhotoUrl(photo)} alt={photo.file_name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
                   ) : (
                     <div className="flex items-center justify-center w-full h-full">
                       <Loader2 size={20} className="animate-spin text-zinc-300" />
                     </div>
                   )}
-
                   <div
                     onClick={(e) => { e.stopPropagation(); toggleSelect(photo.id); }}
                     className={`absolute inset-0 transition-opacity duration-200 cursor-pointer ${selectedIds.has(photo.id) ? 'bg-violet-500/20 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'}`}
@@ -1040,7 +960,6 @@ export default function QRUpload() {
                       </div>
                     </div>
                   </div>
-
                   <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
                     <p className="text-white text-[10px] font-medium truncate">{photo.file_name}</p>
                     <p className="text-white/60 text-[10px]">{formatBytes(photo.size_bytes)}</p>
@@ -1052,17 +971,44 @@ export default function QRUpload() {
         </div>
       </div>
 
-      <Toast toast={toast} onClose={() => setToast(null)} />
+      {/* Quota Exceeded Modal */}
+      {quotaModal.show && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setQuotaModal(m => ({ ...m, show: false }))} />
+          <div className="relative bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-300">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center mx-auto mb-5">
+              <AlertCircle size={24} className="text-amber-500" />
+            </div>
+            <h2 className="text-lg font-black text-zinc-900 text-center mb-3">Photo Limit Exceeded</h2>
+            <p className="text-sm text-zinc-500 text-center mb-1">
+              You can upload only{' '}
+              <span className="font-bold text-violet-600">{quotaModal.canUpload}</span>{' '}
+              more photo{quotaModal.canUpload !== 1 ? 's' : ''} in your plan.
+            </p>
+            <p className="text-sm text-zinc-500 text-center mb-6">
+              You have selected <span className="font-bold text-zinc-800">{quotaModal.trying}</span> photos. Please remove{' '}
+              <span className="font-bold text-red-600">{quotaModal.excess}</span> photo{quotaModal.excess !== 1 ? 's' : ''} from the staging area and try again.
+            </p>
+            <button
+              onClick={() => setQuotaModal(m => ({ ...m, show: false }))}
+              className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm transition-all active:scale-95"
+            >
+              OK, I'll remove some
+            </button>
+          </div>
+        </div>
+      )}
 
+      <Toast toast={toast} onClose={() => setToast(null)} />
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
         message={confirmModal.message}
-        onConfirm={confirmModal.action || (() => {})}
+        onConfirm={confirmModal.action || closeConfirm}
         onCancel={closeConfirm}
-        confirmText="Delete"
+        confirmText={confirmModal.confirmText ?? 'Delete'}
+        isDestructive={confirmModal.isDestructive ?? true}
       />
-
       {actionLoading.loading && <ActionOverlay message={actionLoading.message} />}
     </DashboardLayout>
   );

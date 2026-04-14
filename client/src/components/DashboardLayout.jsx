@@ -12,6 +12,7 @@ import {
   User,
   Settings,
   CalendarDays,
+  Receipt,
 } from "lucide-react";
 
 export default function DashboardLayout({ children }) {
@@ -42,7 +43,7 @@ export default function DashboardLayout({ children }) {
     { name: 'Overview', icon: LayoutDashboard, path: '/studio' },
     { name: 'Events', icon: CalendarDays, path: '/events' },
     { name: 'Plans', icon: ShoppingCart, path: '/pricing' },
-    { name: 'Uploads', icon: CloudUpload, path: '#' },
+    { name: 'Payment History', icon: Receipt, path: '/payments' },
     { name: 'User Management', icon: Users, path: '#' },
     { name: 'Selection Logs', icon: ScrollText, path: '#' },
     { name: 'Analytics', icon: BarChart2, path: '#' },
@@ -114,7 +115,10 @@ export default function DashboardLayout({ children }) {
           </div>
           
           {navItems.map((item) => {
-            const isActive = item.path !== '#' && location.pathname.startsWith(item.path);
+            const isActive = item.path !== '#' && (
+              location.pathname.startsWith(item.path) ||
+              (item.path === '/events' && location.pathname === '/createevent')
+            );
             const Icon = item.icon;
             return (
               <button

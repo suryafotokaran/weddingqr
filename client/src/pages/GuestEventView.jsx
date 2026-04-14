@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getSignedPhotoUrls } from '../lib/s3';
-import { Loader2, Lock, Image as ImageIcon, Heart, ShieldAlert, Download, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Lock, Image as ImageIcon, Heart, ShieldAlert, Download, Eye, EyeOff, ChevronLeft, ChevronRight, X, CheckCircle, Send, MessageCircle } from 'lucide-react';
 
 function SkeletonBlock({ className = "" }) {
   return (
@@ -65,6 +65,15 @@ export default function GuestEventView() {
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState('all'); // 'all' or 'favorites'
   const [signedUrls, setSignedUrls] = useState({});  // { photoId → signedUrl }
+  const [modalIndex, setModalIndex] = useState(null); // index into filtered photos
+  const [submission, setSubmission] = useState(null);   // null = not submitted yet
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [submitName, setSubmitName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [photoComments, setPhotoComments] = useState({}); // photoId → [{...}]
+  const [showCommentInput, setShowCommentInput] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false);
   const [guestId, setGuestId] = useState(() => {
     const saved = localStorage.getItem('guest_id');
     if (saved) return saved;
@@ -76,10 +85,76 @@ export default function GuestEventView() {
   // Returns the best display URL for a photo
   const getPhotoUrl = (photo) => signedUrls[photo.id] || photo.supabase_url || null;
 
+  // Filtered list used by both grid and modal
+  const visiblePhotos = photos.filter(p => activeTab === 'all' || favorites.has(p.id));
+
+  const closeModal = useCallback(() => setModalIndex(null), []);
+  const prevPhoto  = useCallback(() => setModalIndex(i => (i - 1 + visiblePhotos.length) % visiblePhotos.length), [visiblePhotos.length]);
+  const nextPhoto  = useCallback(() => setModalIndex(i => (i + 1) % visiblePhotos.length), [visiblePhotos.length]);
+
+  useEffect(() => {
+    if (modalIndex === null) return;
+    const onKey = (e) => {
+      if (e.key === 'ArrowLeft')  prevPhoto();
+      if (e.key === 'ArrowRight') nextPhoto();
+      if (e.key === 'Escape')     closeModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modalIndex, prevPhoto, nextPhoto, closeModal]);
+
+  // Fetch/refresh thread when switching photos in modal
+  useEffect(() => {
+    setShowCommentInput(false);
+    setCommentText('');
+    if (modalIndex === null || !visiblePhotos[modalIndex]) return;
+    fetchCommentsForPhoto(visiblePhotos[modalIndex].id);
+  }, [modalIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     fetchEvent();
-    fetchGuestSelections();
+    fetchSubmissionThenSelections();
   }, [id]);
+
+  async function fetchSubmissionThenSelections() {
+    const { data } = await supabase
+      .from('guest_submissions')
+      .select('*')
+      .eq('event_id', id)
+      .eq('guest_id', guestId)
+      .maybeSingle();
+    if (data) setSubmission(data);
+    // Only restore previous selections when locked (submitted state)
+    // When re-selection is open (is_locked = false), guest starts fresh
+    if (!data || data.is_locked !== false) {
+      await fetchGuestSelections();
+    }
+  }
+
+  async function fetchCommentsForPhoto(photoId) {
+    const { data } = await supabase
+      .from('photo_comments')
+      .select('*')
+      .eq('photo_id', photoId)
+      .order('created_at', { ascending: true });
+    setPhotoComments(prev => ({ ...prev, [photoId]: data ?? [] }));
+  }
+
+  async function handleSubmitComment(photoId) {
+    if (!commentText.trim()) return;
+    setSubmittingComment(true);
+    await supabase.from('photo_comments').insert({
+      photo_id:    photoId,
+      event_id:    id,
+      sender_type: 'guest',
+      sender_id:   guestId,
+      sender_name: submission?.guest_name ?? null,
+      message:     commentText.trim(),
+    });
+    setCommentText('');
+    setSubmittingComment(false);
+    await fetchCommentsForPhoto(photoId);
+  }
 
   async function fetchGuestSelections() {
     try {
@@ -201,7 +276,36 @@ export default function GuestEventView() {
     }
   };
 
+  const handleSubmitSelection = async () => {
+    if (!submitName.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase
+        .from('guest_submissions')
+        .upsert({
+          event_id:    id,
+          guest_id:    guestId,
+          guest_name:  submitName.trim(),
+          submitted_at: new Date().toISOString(),
+          photo_count: favorites.size,
+          is_locked:   true,
+        }, { onConflict: 'event_id,guest_id' })
+        .select()
+        .single();
+      if (error) throw error;
+      setSubmission(data);
+      setShowSubmitModal(false);
+    } catch (err) {
+      console.error('Submit failed', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isLocked = submission?.is_locked === true;
+
   const toggleFavorite = async (photoId) => {
+    if (isLocked) return;
     const isAdding = !favorites.has(photoId);
     
     // Optimistic UI update
@@ -345,27 +449,46 @@ export default function GuestEventView() {
       {/* Header and Tabs */}
       <header className="bg-white border-b border-zinc-100 sticky top-0 z-20 px-6 pt-4">
         <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between mb-4">
+          {/* Title row */}
+          <div className="flex items-center justify-between mb-2">
             <div>
               <h1 className="text-xl font-black text-zinc-900 leading-tight">{event.name}</h1>
               <p className="text-[10px] font-bold text-teal-600 uppercase tracking-widest">{event.type} • {photos.length} Photos</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-zinc-50 flex items-center justify-center text-zinc-400 shrink-0">
+              <ImageIcon size={20} />
+            </div>
+          </div>
+
+          {/* Action buttons row — shown only when needed */}
+          {((!isLocked && favorites.size > 0) || isLocked || (favorites.size > 0 && event.allow_download)) && (
+            <div className="flex items-center gap-2 mb-3">
               {favorites.size > 0 && event.allow_download && (
-                <button 
+                <button
                   onClick={handleDownloadFavorites}
                   disabled={isDownloading}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-50 text-teal-700 text-xs font-bold hover:bg-teal-100 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  Download {favorites.size} Hearts
+                  Download {favorites.size} Selected
                 </button>
               )}
-              <div className="w-10 h-10 rounded-full bg-zinc-50 flex items-center justify-center text-zinc-400">
-                <ImageIcon size={20} />
-              </div>
+              {!isLocked && favorites.size > 0 && (
+                <button
+                  onClick={() => setShowSubmitModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 text-white text-xs font-bold hover:bg-violet-600 transition-all active:scale-95 shadow-md shadow-violet-500/20"
+                >
+                  <Send size={13} /> Submit Selection
+                </button>
+              )}
+              {isLocked && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-50 border border-green-200">
+                  <CheckCircle size={13} className="text-green-600" />
+                  <span className="text-xs font-bold text-green-700">Submitted</span>
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           <div className="flex items-center gap-6">
             <button 
@@ -375,21 +498,36 @@ export default function GuestEventView() {
               All Photos
               {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 rounded-full" />}
             </button>
-            {event?.allow_download && (
-              <button 
-                onClick={() => setActiveTab('favorites')}
-                className={`pb-3 text-xs font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'favorites' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
-              >
-                Your Hearts
-                <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'favorites' ? 'bg-pink-100 text-pink-600' : 'bg-zinc-100 text-zinc-400'}`}>
-                  {favorites.size}
-                </div>
-                {activeTab === 'favorites' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full" />}
-              </button>
-            )}
+            <button
+              onClick={() => setActiveTab('favorites')}
+              className={`pb-3 text-xs font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'favorites' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
+            >
+              Your Selections
+              <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'favorites' ? 'bg-pink-100 text-pink-600' : 'bg-zinc-100 text-zinc-400'}`}>
+                {favorites.size}
+              </div>
+              {activeTab === 'favorites' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full" />}
+            </button>
           </div>
         </div>
       </header>
+
+      {/* Submission banner */}
+      {isLocked && submission && (
+        <div className="bg-green-50 border-b border-green-100 px-6 py-3">
+          <div className="max-w-6xl mx-auto flex items-center gap-3">
+            <CheckCircle size={16} className="text-green-600 shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-green-800">
+                Selection submitted by {submission.guest_name} · {submission.photo_count} photo{submission.photo_count !== 1 ? 's' : ''}
+              </p>
+              <p className="text-[11px] text-green-600">
+                {new Date(submission.submitted_at).toLocaleString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Grid */}
       <main className="max-w-6xl mx-auto p-6">
@@ -406,20 +544,22 @@ export default function GuestEventView() {
             <div className="w-16 h-16 rounded-3xl bg-pink-50 flex items-center justify-center text-pink-200 mb-4">
               <Heart size={32} />
             </div>
-            <p className="text-zinc-500 font-bold uppercase tracking-widest text-sm">No hearts yet</p>
-            <p className="text-zinc-400 text-xs mt-1">Heart the photos you love to see them here!</p>
+            <p className="text-zinc-500 font-bold uppercase tracking-widest text-sm">No selections yet</p>
+            <p className="text-zinc-400 text-xs mt-1">Select the photos you want to keep them here!</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {photos
-              .filter(photo => activeTab === 'all' || favorites.has(photo.id))
-              .map(photo => (
-              <div key={photo.id} className={`group relative aspect-square rounded-2xl overflow-hidden transition-all duration-300 ${favorites.has(photo.id) ? 'scale-[1.02] ring-4 ring-pink-500/20 shadow-lg shadow-pink-500/10' : 'bg-zinc-200 shadow-sm hover:scale-[1.02]'}`}>
+            {visiblePhotos.map((photo, idx) => (
+              <div
+                key={photo.id}
+                onClick={() => setModalIndex(idx)}
+                className={`group relative aspect-square rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer ${favorites.has(photo.id) ? 'scale-[1.02] ring-4 ring-pink-500/20 shadow-lg shadow-pink-500/10' : 'bg-zinc-200 shadow-sm hover:scale-[1.02]'}`}
+              >
                 {getPhotoUrl(photo) ? (
-                  <img 
-                    src={getPhotoUrl(photo)} 
+                  <img
+                    src={getPhotoUrl(photo)}
                     alt={photo.file_name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover pointer-events-none"
                     loading="lazy"
                   />
                 ) : (
@@ -427,18 +567,16 @@ export default function GuestEventView() {
                     <Loader2 size={20} className="animate-spin text-zinc-300" />
                   </div>
                 )}
-                {event?.allow_download && (
-                  <div 
-                    onClick={() => toggleFavorite(photo.id)}
-                    className={`absolute inset-0 transition-all duration-300 cursor-pointer ${favorites.has(photo.id) ? 'bg-pink-500/10 opacity-100' : 'bg-black/20 opacity-0 group-hover:opacity-100'}`}
-                  >
-                    <div className="absolute top-3 right-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${favorites.has(photo.id) ? 'bg-pink-500 text-white scale-110' : 'bg-white/20 text-white/60 hover:text-white backdrop-blur-md'}`}>
-                        <Heart size={16} fill={favorites.has(photo.id) ? 'currentColor' : 'none'} />
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {/* Heart — top right, stops propagation so it doesn't open modal */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleFavorite(photo.id); }}
+                  className={`absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all
+                    ${favorites.has(photo.id)
+                      ? 'bg-pink-500 text-white scale-110'
+                      : 'bg-black/30 text-white/80 backdrop-blur-md opacity-0 group-hover:opacity-100 hover:bg-pink-500/80'}`}
+                >
+                  <Heart size={15} fill={favorites.has(photo.id) ? 'currentColor' : 'none'} />
+                </button>
               </div>
             ))}
           </div>
@@ -461,6 +599,159 @@ export default function GuestEventView() {
           .silk-gradient { background: linear-gradient(135deg, ${event.theme_color}, ${event.theme_color}dd) !important; }
         `}} />
       )}
+
+      {/* Submit Confirmation Modal */}
+      {showSubmitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowSubmitModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="w-14 h-14 rounded-2xl bg-pink-50 flex items-center justify-center mx-auto mb-5">
+              <Heart size={26} className="text-pink-500" fill="currentColor" />
+            </div>
+            <h2 className="text-xl font-black text-zinc-900 text-center mb-1">Submit Your Selection</h2>
+            <p className="text-sm text-zinc-500 text-center mb-6">
+              You've selected <span className="font-bold text-zinc-800">{favorites.size} photo{favorites.size !== 1 ? 's' : ''}</span>. Once submitted, you cannot change your selection unless the photographer allows it.
+            </p>
+            <input
+              type="text"
+              placeholder="Your name"
+              value={submitName}
+              onChange={e => setSubmitName(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border-2 border-zinc-100 focus:border-pink-400 outline-none text-sm font-semibold mb-4 transition-all"
+              autoFocus
+            />
+            <button
+              onClick={handleSubmitSelection}
+              disabled={!submitName.trim() || submitting}
+              className="w-full py-3 rounded-xl bg-pink-500 hover:bg-pink-600 text-white font-black text-sm transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={15} />}
+              {submitting ? 'Submitting…' : 'Confirm & Submit'}
+            </button>
+            <button onClick={() => setShowSubmitModal(false)} className="w-full mt-3 py-2 text-sm text-zinc-400 hover:text-zinc-600 font-semibold transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Full-size Modal */}
+      {modalIndex !== null && visiblePhotos[modalIndex] && (() => {
+        const photo = visiblePhotos[modalIndex];
+        const isFav = favorites.has(photo.id);
+        return (
+          <div className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur-sm" onClick={() => { if (showCommentInput) { setShowCommentInput(false); } else { closeModal(); } }}>
+            {/* Top bar */}
+            <div className="flex items-center justify-between px-5 py-4 shrink-0" onClick={e => e.stopPropagation()}>
+              <span className="text-white/50 text-xs font-bold">{modalIndex + 1} / {visiblePhotos.length}</span>
+              <button onClick={closeModal} className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-all">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Image + arrows */}
+            <div className="flex-1 flex items-center justify-center relative min-h-0 px-14" onClick={e => { e.stopPropagation(); if (showCommentInput) setShowCommentInput(false); }}>
+              <button onClick={prevPhoto} className="absolute left-3 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95">
+                <ChevronLeft size={22} />
+              </button>
+
+              <img
+                key={photo.id}
+                src={getPhotoUrl(photo)}
+                alt={photo.file_name}
+                className="max-h-full max-w-full object-contain rounded-xl select-none"
+                draggable={false}
+              />
+
+              <button onClick={nextPhoto} className="absolute right-3 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95">
+                <ChevronRight size={22} />
+              </button>
+            </div>
+
+            {/* Bottom — heart + comment */}
+            <div className="shrink-0 flex flex-col items-center gap-3 py-4 px-4 w-full" onClick={e => { e.stopPropagation(); setShowCommentInput(false); }}>
+
+              {/* Chat panel */}
+              {showCommentInput && (
+                <div className="w-full max-w-md bg-white/5 border border-white/10 rounded-2xl overflow-hidden animate-in slide-in-from-bottom-2 duration-200" onClick={e => e.stopPropagation()}>
+                  {/* Thread header */}
+                  <div className="px-4 py-2.5 border-b border-white/10 flex items-center gap-2">
+                    <MessageCircle size={12} className="text-white/40" />
+                    <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Photo Feedback</p>
+                  </div>
+
+                  {/* Messages */}
+                  <div className="max-h-44 overflow-y-auto p-3 space-y-2">
+                    {(photoComments[photo.id] ?? []).length === 0 ? (
+                      <p className="text-center text-white/25 text-xs py-4">No messages yet — start the conversation</p>
+                    ) : (
+                      (photoComments[photo.id] ?? []).map(msg => {
+                        const isMe = msg.sender_type === 'guest' && msg.sender_id === guestId;
+                        return (
+                          <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm leading-snug ${isMe ? 'bg-violet-500 text-white rounded-br-sm' : 'bg-white/15 text-white rounded-bl-sm'}`}>
+                              {!isMe && <p className="text-[10px] font-bold text-white/50 mb-0.5">Photographer</p>}
+                              <p>{msg.message}</p>
+                              <p className={`text-[9px] mt-1 ${isMe ? 'text-violet-200' : 'text-white/30'}`}>
+                                {new Date(msg.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                {' · '}
+                                {new Date(msg.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Input row */}
+                  <div className="p-3 border-t border-white/10 flex gap-2">
+                    <input
+                      value={commentText}
+                      onChange={e => setCommentText(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(photo.id); } }}
+                      placeholder="Type a message..."
+                      autoFocus
+                      className="flex-1 bg-white/10 text-white placeholder-white/30 border border-white/15 rounded-xl px-3 py-2 text-sm outline-none focus:border-violet-400"
+                    />
+                    <button
+                      onClick={() => handleSubmitComment(photo.id)}
+                      disabled={submittingComment || !commentText.trim()}
+                      className="w-9 h-9 rounded-xl bg-violet-500 text-white flex items-center justify-center disabled:opacity-40 hover:bg-violet-600 transition-all active:scale-95 shrink-0"
+                    >
+                      {submittingComment ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-4" onClick={e => e.stopPropagation()}>
+                <button
+                  onClick={() => toggleFavorite(photo.id)}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-sm transition-all active:scale-95 ${isFav ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/40' : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'}`}
+                >
+                  <Heart size={18} fill={isFav ? 'currentColor' : 'none'} />
+                  {isFav ? 'Selected' : 'Select this photo'}
+                </button>
+
+                {/* Comment button */}
+                {(() => {
+                  const threadCount = (photoComments[photo.id] ?? []).length;
+                  return (
+                    <button
+                      onClick={() => setShowCommentInput(prev => !prev)}
+                      className={`relative flex items-center gap-2 px-4 py-3 rounded-full font-bold text-sm transition-all active:scale-95 ${showCommentInput ? 'bg-white/20 text-white' : threadCount > 0 ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/40' : 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'}`}
+                    >
+                      <MessageCircle size={18} fill={threadCount > 0 ? 'currentColor' : 'none'} />
+                      {threadCount > 0 ? `${threadCount} message${threadCount > 1 ? 's' : ''}` : 'Feedback'}
+                    </button>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {event?.allow_screenshot && (
         <style dangerouslySetInnerHTML={{ __html: `

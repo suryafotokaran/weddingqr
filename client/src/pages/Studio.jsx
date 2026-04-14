@@ -4,22 +4,8 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  HardDrive,
-  CalendarDays,
-  Tag,
-  ChevronRight,
-  FolderOpen,
-  RefreshCw,
-  Plus,
+  Images, CalendarDays, Tag, ChevronRight, FolderOpen, Plus, Clock,
 } from 'lucide-react';
-
-function formatBytes(bytes) {
-  if (!bytes) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -35,17 +21,21 @@ function formatDate(d) {
   });
 }
 
+function getDaysLeft(endDate) {
+  if (!endDate) return null;
+  const ms = new Date(endDate) - new Date();
+  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
+}
+
 export default function Studio() {
   const navigate = useNavigate();
   const { data: userData } = useCurrentUser();
-  const fullName  = userData?.fullName  ?? 'Photographer';
+  const fullName = userData?.fullName ?? 'Photographer';
 
-  const [events,       setEvents]       = useState([]);
-  const [totalStorage, setTotalStorage] = useState(0);
-  const [storageUsed,  setStorageUsed]  = useState({});
-  const [loading,      setLoading]      = useState(true);
-  const [activeSub,    setActiveSub]    = useState(null);
-  const [subStorageUsed, setSubStorageUsed] = useState(0);
+  const [events,      setEvents]      = useState([]);
+  const [photoCount,  setPhotoCount]  = useState(0);
+  const [activePlan,  setActivePlan]  = useState(null);
+  const [loading,     setLoading]     = useState(true);
 
   useEffect(() => {
     const user = userData?.user;
@@ -54,52 +44,33 @@ export default function Studio() {
     (async () => {
       setLoading(true);
 
-      // Check active subscription
-      const { data: subData } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .gt('end_date', new Date().toISOString())
-        .order('created_at', { ascending: false })
-        .limit(1);
-      const sub = subData?.[0] ?? null;
-      setActiveSub(sub);
+      // Fetch active plan + photo count in parallel
+      const [planRes, evRes, countRes] = await Promise.all([
+        supabase.rpc('get_user_active_plan', { p_user_id: user.id }),
+        supabase.from('events').select('id, name, type, date, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
+      ]);
 
-      // Fetch events
-      const { data: evs } = await supabase
-        .from('events')
-        .select('id, name, type, date, storage_gb, subscription_id, created_at, purchase_id, purchases(plan)')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      const eventList = evs ?? [];
-      setEvents(eventList);
-
-      if (eventList.length > 0) {
-        const { data: ph } = await supabase
-          .from('photos')
-          .select('event_id, size_bytes')
-          .in('event_id', eventList.map(e => e.id));
-
-        const usage = {};
-        for (const p of ph ?? []) {
-          usage[p.event_id] = (usage[p.event_id] ?? 0) + (p.size_bytes || 0);
-        }
-        setStorageUsed(usage);
-        setTotalStorage(Object.values(usage).reduce((a, b) => a + b, 0));
-
-        // Calculate subscription pool usage
-        if (sub) {
-          const subEvents = eventList.filter(e => e.subscription_id === sub.id);
-          const subUsed = subEvents.reduce((acc, e) => acc + (usage[e.id] ?? 0), 0);
-          setSubStorageUsed(subUsed);
-        }
-      }
-
+      setActivePlan(planRes.data?.[0] ?? null);
+      setEvents(evRes.data ?? []);
+      setPhotoCount(countRes.data ?? 0);
       setLoading(false);
     })();
   }, [userData]);
+
+  const daysLeft = getDaysLeft(activePlan?.end_date);
+
+  const daysLeftBadge = () => {
+    if (daysLeft === null) return null;
+    let cls = 'bg-teal-500/40 text-teal-50';
+    if (daysLeft <= 5) cls = 'bg-red-500 text-white font-bold shadow-md ring-2 ring-red-400/50';
+    else if (daysLeft <= 10) cls = 'bg-amber-400 text-amber-900 font-bold shadow-sm';
+    return (
+      <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide ${cls}`}>
+        {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left
+      </span>
+    );
+  };
 
   return (
     <DashboardLayout>
@@ -111,29 +82,32 @@ export default function Studio() {
         </h1>
       </header>
 
-      {/* Active Subscription Banner */}
-      {activeSub && (
+      {/* Active Plan Banner */}
+      {activePlan && (
         <section className="mb-6">
           <div className="bg-gradient-to-r from-teal-600 to-teal-700 rounded-2xl p-6 text-white flex flex-col md:flex-row md:items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-              <RefreshCw size={22} className="text-white" />
+              <Clock size={22} className="text-white" />
             </div>
             <div className="flex-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-teal-200 mb-0.5">Monthly Subscription · Active</p>
-              <p className="font-bold text-lg">{activeSub.plan_key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-teal-200 mb-0.5">
+                {activePlan.plan_key === 'free_trial' ? 'Free Trial · Active' : 'Yearly Plan · Active'}
+              </p>
+              <p className="font-bold text-lg capitalize">{activePlan.plan_key.replace(/_/g, ' ')}</p>
               <div className="flex items-center gap-4 mt-1">
                 <span className="text-xs text-teal-100">
-                  {formatBytes(subStorageUsed)} / {activeSub.storage_gb} GB used
+                  {photoCount.toLocaleString()} / {activePlan.photos_limit.toLocaleString()} photos used
                 </span>
-                <span className="text-xs text-teal-200">
-                  Expires {formatDate(activeSub.end_date)}
+                <span className="text-xs text-teal-200 flex items-center gap-2">
+                  Expires {formatDate(activePlan.end_date)}
+                  {daysLeftBadge()}
                 </span>
               </div>
-              {/* Pool progress bar */}
+              {/* Photo quota progress */}
               <div className="mt-2 h-1.5 bg-white/20 rounded-full overflow-hidden w-full max-w-xs">
                 <div
                   className="h-full bg-white rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, (subStorageUsed / (activeSub.storage_gb * 1024 * 1024 * 1024)) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (photoCount / activePlan.photos_limit) * 100)}%` }}
                 />
               </div>
             </div>
@@ -166,23 +140,28 @@ export default function Studio() {
           </button>
         </div>
 
-        {/* Total Storage Used */}
+        {/* Total Photos */}
         <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300">
           <div>
-            <HardDrive size={24} className="text-amber-700 mb-4" />
-            <h4 className="text-sm font-medium text-zinc-500">Total Storage Used</h4>
+            <Images size={24} className="text-amber-700 mb-4" />
+            <h4 className="text-sm font-medium text-zinc-500">Total Photos Uploaded</h4>
             <p className="text-4xl font-extrabold mt-2 text-zinc-900">
-              {loading ? '—' : formatBytes(totalStorage)}
+              {loading ? '—' : photoCount.toLocaleString()}
             </p>
+            {activePlan && (
+              <p className="text-sm text-zinc-400 mt-1">
+                of {activePlan.photos_limit.toLocaleString()} photo limit
+              </p>
+            )}
           </div>
           <div className="mt-6 flex items-center gap-2 text-xs font-bold text-amber-700 bg-orange-50 w-fit px-3 py-1.5 rounded-lg">
-            <HardDrive size={12} />
+            <Images size={12} />
             ACROSS ALL EVENTS
           </div>
         </div>
       </section>
 
-      {/* Recent Events List */}
+      {/* Recent Events */}
       <section className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 mb-10">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold tracking-tight text-zinc-900">Recent Events</h3>
@@ -214,62 +193,28 @@ export default function Studio() {
           </div>
         ) : (
           <div className="space-y-2">
-            {events.slice(0, 6).map(event => {
-                const plan      = event.purchases?.plan ?? null;
-
-                const planStyle = {
-                  basic:   { bg: '#f3f3f4', color: '#3d4947', label: 'Starter'      },
-                  pro:     { bg: '#89f5e7', color: '#00685f', label: 'Professional' },
-                  premium: { bg: '#ffdbcf', color: '#85513e', label: 'Elite'        },
-                }[plan] ?? { bg: '#f3f3f4', color: '#6d7a77', label: 'Plan' };
-
-                return (
-                  <div
-                    key={event.id}
-                    onClick={() => navigate(`/events/${event.id}`)}
-                    className="flex items-center gap-4 p-4 rounded-xl hover:bg-zinc-50 cursor-pointer group transition-colors"
-                  >
-                    {/* Icon */}
-                    <div className="w-11 h-11 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
-                      <CalendarDays size={20} className="text-teal-600" />
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-zinc-900 truncate">{event.name}</p>
-                      <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-400">
-                        <span className="flex items-center gap-1"><Tag size={11} />{event.type}</span>
-                        <span className="flex items-center gap-1"><CalendarDays size={11} />{formatDate(event.date)}</span>
-                      </div>
-                    </div>
-
-                    {/* Right side tags */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* Storage used badge */}
-                      <span className="text-[11px] font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full">
-                        {formatBytes(storageUsed[event.id] ?? 0)} / {event.storage_gb} GB
-                      </span>
-                      {/* Plan tag */}
-                      {plan && (
-                        <span
-                          className="text-[11px] font-bold px-2.5 py-1 rounded-full"
-                          style={{ background: planStyle.bg, color: planStyle.color }}
-                        >
-                          {planStyle.label}
-                        </span>
-                      )}
-                    </div>
-
-                    <ChevronRight size={16} className="text-zinc-300 group-hover:text-teal-500 transition-colors shrink-0" />
+            {events.slice(0, 6).map(event => (
+              <div
+                key={event.id}
+                onClick={() => navigate(`/events/${event.id}`)}
+                className="flex items-center gap-4 p-4 rounded-xl hover:bg-zinc-50 cursor-pointer group transition-colors"
+              >
+                <div className="w-11 h-11 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
+                  <CalendarDays size={20} className="text-teal-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-zinc-900 truncate">{event.name}</p>
+                  <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-400">
+                    <span className="flex items-center gap-1"><Tag size={11} />{event.type}</span>
+                    <span className="flex items-center gap-1"><CalendarDays size={11} />{formatDate(event.date)}</span>
                   </div>
-                );
-              })}
+                </div>
+                <ChevronRight size={16} className="text-zinc-300 group-hover:text-teal-500 transition-colors shrink-0" />
+              </div>
+            ))}
           </div>
         )}
       </section>
-
-      {/* Cloud Storage — hidden for now */}
-      {/* <div className="bg-teal-900 text-white p-8 rounded-2xl shadow-xl ...">...</div> */}
 
       {/* Footer */}
       <footer className="mt-4 py-8 border-t border-zinc-100 text-center">

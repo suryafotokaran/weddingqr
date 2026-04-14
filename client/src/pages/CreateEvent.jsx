@@ -5,7 +5,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import {
-  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper, HardDrive, RefreshCw,
+  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper,
 } from 'lucide-react';
 
 const EVENT_CATEGORIES = [
@@ -18,11 +18,11 @@ export default function CreateEvent() {
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
 
-  const [purchase, setPurchase]           = useState(null);    // per-event purchase
-  const [subscription, setSubscription]   = useState(null);   // active monthly subscription
-  const [form, setForm]                   = useState({ name: '', category: 'Wedding', date: '' });
-  const [saving, setSaving]               = useState(false);
-  const [toast, setToast]                 = useState(null);
+  const [activePlan, setActivePlan] = useState(null);
+  const [planLoading, setPlanLoading] = useState(true);
+  const [form, setForm] = useState({ name: '', category: 'Wedding', date: '' });
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const showToast = (type, title, message) => {
     setToast({ type, title, message });
@@ -31,106 +31,65 @@ export default function CreateEvent() {
 
   useEffect(() => {
     if (!user) return;
+    (async () => {
+      setPlanLoading(true);
 
-    // Check for active subscription from DB first (most authoritative source)
-    supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .gt('end_date', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .then(({ data }) => {
-        const activeSub = data?.[0] ?? null;
+      // Get active plan via RPC (also marks expired plans)
+      const { data: planRows } = await supabase.rpc('get_user_active_plan', { p_user_id: user.id });
+      const plan = planRows?.[0] ?? null;
 
-        if (activeSub) {
-          // User has an active subscription — all new events go to the pool
-          setSubscription(activeSub);
+      if (!plan) {
+        // No active plan at all → go to pricing
+        navigate('/pricing', { replace: true });
+        return;
+      }
 
-          // Clear any stale sessionStorage purchase
-          sessionStorage.removeItem('pendingPurchase');
+      // Free trial: check if user already has an event
+      if (plan.plan_key === 'free_trial') {
+        const { count } = await supabase
+          .from('events')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id);
+
+        if (count >= 1) {
+          // Free trial exhausted → redirect to pricing with message
+          navigate('/pricing?upgrade=true', { replace: true });
           return;
         }
+      }
 
-        // No active subscription — check for per-event purchase
-        const raw = sessionStorage.getItem('pendingPurchase');
-        if (!raw) {
-          navigate('/pricing', { replace: true });
-          return;
-        }
-        try {
-          setPurchase(JSON.parse(raw));
-        } catch {
-          navigate('/pricing', { replace: true });
-        }
-      });
+      setActivePlan(plan);
+      setPlanLoading(false);
+    })();
   }, [user, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user) return;
-    if (!purchase && !subscription) return;
-
+    if (!user || !activePlan) return;
     setSaving(true);
 
-    if (subscription) {
-      // ── Subscription-based event ──────────────────────────────────────────
-      const { data, error } = await supabase
-        .from('events')
-        .insert({
-          user_id:          user.id,
-          name:             form.name.trim(),
-          type:             form.category,
-          date:             form.date,
-          subscription_id:  subscription.id,
-          storage_gb:       subscription.storage_gb,   // reference, actual limit is pooled
-          max_image_size_mb: subscription.max_image_size_mb ?? 50,
-          photos_limit:     99999,
-        })
-        .select()
-        .single();
+    const { data, error } = await supabase
+      .from('events')
+      .insert({
+        user_id:           user.id,
+        name:              form.name.trim(),
+        type:              form.category,
+        date:              form.date,
+        max_image_size_mb: activePlan.max_image_size_mb ?? 20,
+      })
+      .select()
+      .single();
 
-      setSaving(false);
+    setSaving(false);
 
-      if (error) {
-        showToast('error', 'Failed to create event', error.message);
-        return;
-      }
-      navigate(`/events/${data.id}`);
-
-    } else {
-      // ── Per-event purchase ────────────────────────────────────────────────
-      const { data, error } = await supabase
-        .from('events')
-        .insert({
-          user_id:          user.id,
-          name:             form.name.trim(),
-          type:             form.category,
-          date:             form.date,
-          purchase_id:      purchase.purchaseId,
-          photos_limit:     99999,
-          storage_gb:       purchase.storageGb,
-          max_image_size_mb: purchase.maxImageSizeMb ?? 50,
-        })
-        .select()
-        .single();
-
-      setSaving(false);
-
-      if (error) {
-        showToast('error', 'Failed to create event', error.message);
-        return;
-      }
-
-      sessionStorage.removeItem('pendingPurchase');
-      navigate(`/events/${data.id}`);
+    if (error) {
+      showToast('error', 'Failed to create event', error.message);
+      return;
     }
+    navigate(`/events/${data.id}`);
   };
 
-  const isReady = purchase || subscription;
-
-  if (!isReady) {
+  if (planLoading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center min-h-64">
@@ -140,6 +99,8 @@ export default function CreateEvent() {
     );
   }
 
+  if (!activePlan) return null;
+
   const formatDate = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
@@ -148,21 +109,12 @@ export default function CreateEvent() {
         {/* Header */}
         <div className="mb-10">
           <div className="flex items-center gap-2 mb-4">
-            {subscription ? (
-              <span
-                className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
-                style={{ background: '#89f5e7', color: '#00685f' }}
-              >
-                <RefreshCw size={12} /> Monthly Plan Active
-              </span>
-            ) : (
-              <span
-                className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
-                style={{ background: '#89f5e7', color: '#00685f' }}
-              >
-                <PartyPopper size={12} /> Payment Successful
-              </span>
-            )}
+            <span
+              className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
+              style={{ background: '#89f5e7', color: '#00685f' }}
+            >
+              <PartyPopper size={12} /> {activePlan.plan_key === 'free_trial' ? 'Free Trial' : `${activePlan.plan_key} Plan`}
+            </span>
           </div>
           <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900 mb-2">
             Create Your Event
@@ -172,39 +124,18 @@ export default function CreateEvent() {
           </p>
         </div>
 
-        {/* Plan Badge */}
+        {/* Plan Info */}
         <div
           className="flex items-center justify-between p-5 rounded-2xl mb-8 border"
           style={{ background: '#f3f3f4', borderColor: '#e2e2e2' }}
         >
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">
-              {subscription ? 'Monthly Subscription' : 'Active Plan'}
-            </p>
-            <p className="font-bold text-zinc-900 capitalize flex items-center gap-1.5">
-              {subscription
-                ? <><RefreshCw size={13} className="text-teal-600" /> {subscription.plan_key.replace(/_/g, ' ')}</>
-                : `${purchase.plan} Plan`
-              }
-            </p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Active Plan</p>
+            <p className="font-bold text-zinc-900 capitalize">{activePlan.plan_key.replace(/_/g, ' ')}</p>
           </div>
           <div className="text-right">
-            {subscription ? (
-              <>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Shared Pool</p>
-                <p className="font-bold text-teal-700 flex items-center gap-1 justify-end">
-                  <HardDrive size={13} /> {subscription.storage_gb} GB · Expires {formatDate(subscription.end_date)}
-                </p>
-                <p className="text-[10px] text-zinc-400 mt-0.5">Storage shared across all your events</p>
-              </>
-            ) : (
-              <>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Storage</p>
-                <p className="font-bold text-teal-700 flex items-center gap-1 justify-end">
-                  <HardDrive size={13} /> {purchase.storageGb} GB · Max {purchase.maxImageSizeMb ?? 50} MB/photo
-                </p>
-              </>
-            )}
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Photo Limit</p>
+            <p className="font-bold text-teal-700">{activePlan.photos_limit.toLocaleString()} photos · Expires {formatDate(activePlan.end_date)}</p>
           </div>
         </div>
 

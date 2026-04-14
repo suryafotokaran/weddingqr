@@ -27,7 +27,7 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
           </div>
           
           <h3 className="text-xl font-bold text-zinc-900 mb-2 tracking-tight">{title}</h3>
-          <p className="text-sm text-zinc-500 leading-relaxed mb-8">
+          <p className="text-sm text-zinc-500 leading-relaxed mb-8 whitespace-pre-wrap">
             {message}
           </p>
 

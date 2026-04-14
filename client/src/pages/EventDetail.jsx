@@ -1,20 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { uploadToIDrive, getSignedPhotoUrls, deleteFromIDrive, buildIDriveRefUrl } from '../lib/s3';
-
+import { uploadToR2, getSignedPhotoUrls, deleteFromR2, buildR2RefUrl } from '../lib/s3';
+import imageCompression from 'browser-image-compression';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
-import UpgradePlan from '../components/UpgradePlan';
-import MonthlyUpgradePlan from '../components/MonthlyUpgradePlan';
 import ConfirmModal from '../components/ConfirmModal';
 import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ImageIcon,
-  CalendarDays, Tag, Images, ArrowLeft, CloudUpload, ArrowUp,
-  Lock, Share2, Copy, Check, Trash2, Download, Square, CheckSquare,
-  Eye, EyeOff, Heart, MonitorOff, HardDrive
+  CalendarDays, Tag, Images, CloudUpload, ArrowLeft, FolderOpen,
+  Lock, Copy, Check, Trash2, Download, Square, CheckSquare,
+  Eye, EyeOff, Heart, MonitorOff, Users, RotateCcw, Clock, MessageCircle, Send, Pencil
 } from 'lucide-react';
+
+const getCompressionOptions = (maxMb) => ({
+  maxSizeMB:        Math.min(maxMb, 2),
+  maxWidthOrHeight: 3840,
+  useWebWorker:     true,
+  preserveExifData: true,
+});
 
 // Per-file size limit defaults to 50 MB — overridden dynamically from event.max_image_size_mb
 
@@ -146,31 +151,39 @@ export default function EventDetail() {
   const user = userData?.user;
 
   const [event, setEvent]           = useState(null);
-  const [photos, setPhotos]         = useState([]);       // host-only photos shown in gallery
-  const [allPhotos, setAllPhotos]   = useState([]);       // ALL photos (host+guest) for storage calc
-  const [uploading, setUploading]   = useState([]);
+  const [photos, setPhotos]         = useState([]);
+  const [allPhotos, setAllPhotos]   = useState([]);
+  const [stagedFiles, setStagedFiles] = useState([]);
+  const [uploadState, setUploadState] = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+  const [quotaModal,  setQuotaModal]  = useState({ show: false, canUpload: 0, trying: 0, excess: 0 });
   const [loading, setLoading]       = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast]           = useState(null);
-  const [showUpgrade, setShowUpgrade] = useState(false);
-  const [showMonthlyUpgrade, setShowMonthlyUpgrade] = useState(false);
-  const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [tempPassword, setTempPassword] = useState('');
   const [copied, setCopied] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [isDeleting, setIsDeleting] = useState(false);
   const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
+  const [guestSubmissions, setGuestSubmissions] = useState([]);
+  const [photoComments, setPhotoComments] = useState({}); // photoId → [{...}]
+  const [replyDraft, setReplyDraft] = useState({}); // photoId → draft string
+  const [sendingReply, setSendingReply] = useState(null); // photoId currently sending
+  const [replacingPhotoId, setReplacingPhotoId] = useState(null); // photoId currently being replaced
+  const replaceInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState('all');
+  const [showGallery, setShowGallery] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
+  const [activePlan, setActivePlan] = useState(null);
+  const [photoCount, setPhotoCount] = useState(0);
 
   const triggerConfirm = (title, message, action) => {
     setConfirmModal({ isOpen: true, title, message, action });
   };
   const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
   const [signedUrls, setSignedUrls] = useState({});
-  const [subscription, setSubscription] = useState(null);       // active subscription if event is in pool
-  const [poolUsedBytes, setPoolUsedBytes] = useState(0);       // total bytes used across subscription events
-  const fileInputRef                = useRef(null);
+  const fileInputRef    = useRef(null);
+  const cancelUploadRef = useRef(false);
+
+  const removeStagedFile = (sid) => setStagedFiles(prev => prev.filter(f => f.id !== sid));
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -222,152 +235,300 @@ export default function EventDetail() {
 
   useEffect(() => { fetchEvent(true); }, [fetchEvent]);
 
-  // If event has a subscription_id, fetch subscription data + pool usage
-  useEffect(() => {
-    if (!event?.subscription_id) {
-      setSubscription(null);
-      setPoolUsedBytes(0);
-      return;
-    }
-    supabase
-      .from('subscriptions')
+  const fetchGuestSubmissions = useCallback(async () => {
+    const { data } = await supabase
+      .from('guest_submissions')
       .select('*')
-      .eq('id', event.subscription_id)
-      .single()
-      .then(({ data: sub }) => {
-        if (!sub) return;
-        setSubscription(sub);
+      .eq('event_id', id)
+      .order('submitted_at', { ascending: false });
+    setGuestSubmissions(data ?? []);
+  }, [id]);
 
-        // Fetch all events in this subscription pool, then sum their photo sizes
-        supabase
-          .from('events')
-          .select('id')
-          .eq('subscription_id', sub.id)
-          .then(({ data: poolEvents }) => {
-            if (!poolEvents?.length) return;
-            // Count ALL photos (host + guest) for pool storage
-        supabase
-              .from('photos')
-              .select('size_bytes')
-              .in('event_id', poolEvents.map(e => e.id))
-              .then(({ data: poolPhotos }) => {
-                const total = (poolPhotos ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-                setPoolUsedBytes(total);
-              });
-          });
-      });
-  }, [event?.subscription_id]);
+  useEffect(() => { fetchGuestSubmissions(); }, [fetchGuestSubmissions]);
 
-  // ── Upload to iDrive e2 Storage (S3-compatible) ───────────────────────────
-  const uploadFiles = useCallback(async (files) => {
-    if (!user || !event) return;
+  const fetchPhotoComments = useCallback(async () => {
+    const { data } = await supabase
+      .from('photo_comments')
+      .select('*')
+      .eq('event_id', id)
+      .order('created_at', { ascending: true });
+    const map = {};
+    (data ?? []).forEach(c => {
+      if (!map[c.photo_id]) map[c.photo_id] = [];
+      map[c.photo_id].push(c);
+    });
+    setPhotoComments(map);
+  }, [id]);
 
-    const maxFileSizeMb = event.max_image_size_mb || 50;
-    const maxFileSize   = maxFileSizeMb * 1024 * 1024;
+  useEffect(() => { fetchPhotoComments(); }, [fetchPhotoComments]);
 
-    const validFiles = [];
-    for (const f of files) {
-      if (f.size > maxFileSize) {
-        showToast('error', 'File too large', `"${f.name}" exceeds the ${maxFileSizeMb} MB per-photo limit.`);
-        continue;
+  const handleReplacePhoto = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !replacingPhotoId || !user || !event) return;
+    const photo = photos.find(p => p.id === replacingPhotoId);
+    if (!photo) return;
+    setReplacingPhotoId(null);
+    setActionLoading({ loading: true, message: 'Replacing photo…' });
+    try {
+      const maxMb = event.max_image_size_mb || 20;
+      const compressed = await imageCompression(file, getCompressionOptions(maxMb));
+      const ext = file.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const folderName = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+      const newPath = `${user.id}/${folderName}/photoselection/${fileName}`;
+      // Upload new file
+      await uploadToR2(compressed, newPath);
+      const newRefUrl = buildR2RefUrl(newPath);
+      // Update DB record (photo_id stays same — comments stay linked)
+      const { error: dbErr } = await supabase.from('photos').update({
+        storage_path: newPath,
+        supabase_url: newRefUrl,
+        file_name: file.name,
+        size_bytes: compressed.size,
+      }).eq('id', photo.id);
+      if (dbErr) throw dbErr;
+      // Delete old file from R2
+      if (photo.storage_path && !photo.supabase_url?.includes('supabase.co')) {
+        await deleteFromR2([photo.storage_path]);
       }
+      // Clear stale signed URL so new one is fetched
+      setSignedUrls(prev => { const n = { ...prev }; delete n[photo.id]; return n; });
+      showToast('success', 'Photo Replaced', 'The photo has been updated successfully.');
+      await fetchEvent();
+    } catch (err) {
+      showToast('error', 'Replace Failed', err.message);
+    } finally {
+      setActionLoading({ loading: false, message: '' });
+    }
+  };
+
+  const handlePhotographerReply = async (photoId) => {
+    const text = (replyDraft[photoId] || '').trim();
+    if (!text || !user) return;
+    setSendingReply(photoId);
+    await supabase.from('photo_comments').insert({
+      photo_id:    photoId,
+      event_id:    id,
+      sender_type: 'photographer',
+      sender_id:   user.id,
+      sender_name: 'Photographer',
+      message:     text,
+    });
+    setReplyDraft(prev => ({ ...prev, [photoId]: '' }));
+    setSendingReply(null);
+    await fetchPhotoComments();
+  };
+
+  // Fetch user's active plan + global photo count whenever event loads
+  useEffect(() => {
+    if (!user || !event) return;
+    Promise.all([
+      supabase.rpc('get_user_active_plan', { p_user_id: user.id }),
+      supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
+    ]).then(([planRes, countRes]) => {
+      setActivePlan(planRes.data?.[0] ?? null);
+      setPhotoCount(countRes.data ?? 0);
+    });
+  }, [user, event]);
+
+  // ── Stage files (local preview) ───────────────────────────────────────────
+  const stageFiles = useCallback((files) => {
+    if (!user || !event) return;
+    const imageFiles = Array.from(files).filter(f => {
       if (!f.type.startsWith('image/')) {
         showToast('error', 'Invalid file', `"${f.name}" is not an image.`);
-        continue;
+        return false;
       }
-      // Check storage limit (pool-aware) — count ALL photos incl. guest uploads
-      const isPooled = !!event.subscription_id;
-      const storageUsed = isPooled
-        ? poolUsedBytes
-        : allPhotos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-      const limitGb = isPooled ? (subscription?.storage_gb ?? event.storage_gb) : event.storage_gb;
-      const pendingBytes  = validFiles.reduce((acc, f) => acc + f.size, 0);
-      const storageLimit  = limitGb * 1024 * 1024 * 1024;
-      if (storageUsed + pendingBytes + f.size > storageLimit) {
-        showToast('error', 'Storage limit reached', `Adding "${f.name}" would exceed your ${limitGb} GB ${isPooled ? 'shared ' : ''}storage limit.`);
-        if (!isPooled) setShowUpgrade(true);
-        break;
+      return true;
+    });
+    if (!imageFiles.length) return;
+    setStagedFiles(prev => {
+      const uploadedNames = new Set(photos.map(p => p.file_name));
+      const stagedNames   = new Set(prev.map(s => s.file.name));
+      const unique        = imageFiles.filter(f => !uploadedNames.has(f.name) && !stagedNames.has(f.name));
+      const dupeCount     = imageFiles.length - unique.length;
+      if (dupeCount > 0) {
+        setTimeout(() => showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`), 0);
       }
-      validFiles.push(f);
+      const newItems = unique.map(f => ({
+        id:         Math.random().toString(36).slice(2),
+        file:       f,
+        previewUrl: URL.createObjectURL(f),
+      }));
+      return [...prev, ...newItems];
+    });
+  }, [user, event, photos]);
+
+  // ── Upload staged files: compress all → upload all ────────────────────────
+  const startUpload = async () => {
+    if (!stagedFiles.length || !user || !event) return;
+
+    // Quota validation — show modal instead of toast
+    if (planLimit !== null) {
+      const remaining = Math.max(0, planLimit - photoCount);
+      if (stagedFiles.length > remaining) {
+        setQuotaModal({ show: true, canUpload: remaining, trying: stagedFiles.length, excess: stagedFiles.length - remaining });
+        return;
+      }
     }
 
-    if (!validFiles.length) return;
+    cancelUploadRef.current = false;
+    let cancelled = false;
+    const maxMb = event.max_image_size_mb || 20;
 
-    const newItems = validFiles.map(f => ({
-      id:         Math.random().toString(36).slice(2),
-      file:       f,
-      status:     'pending',
-      progress:   0,
-      error:      null,
-      previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
-    }));
+    // ── Phase 1: Compress all ────────────────────────────────────────────────
+    const compressedItems = [];
+    for (let i = 0; i < stagedFiles.length; i++) {
+      if (cancelUploadRef.current) { cancelled = true; break; }
+      const item = stagedFiles[i];
+      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round((i / stagedFiles.length) * 100), message: item.file.name });
+      try {
+        const compressed = await imageCompression(item.file, getCompressionOptions(maxMb));
+        compressedItems.push({ ...item, compressed });
+      } catch {
+        compressedItems.push({ ...item, compressed: item.file });
+      }
+      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round(((i + 1) / stagedFiles.length) * 100), message: item.file.name });
+    }
 
-    setUploading(prev => [...newItems, ...prev]);
+    if (cancelled) {
+      cancelUploadRef.current = false;
+      setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+      setStagedFiles([]);
+      setSelectedFolderName(null);
+      return;
+    }
 
-    for (const item of newItems) {
-      setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'uploading' } : u));
+    // ── Phase 2: Upload all ──────────────────────────────────────────────────
+    const remainingStash = [...stagedFiles];
+    let uploaded = 0;
+
+    for (let i = 0; i < compressedItems.length; i++) {
+      if (cancelUploadRef.current) { cancelled = true; break; }
+      const item = compressedItems[i];
+      setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round((i / compressedItems.length) * 100), message: item.file.name });
+
+      // Skip if already uploaded (safety check)
+      if (photos.some(p => p.file_name === item.file.name)) {
+        const idx = remainingStash.findIndex(s => s.id === item.id);
+        if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
+        continue;
+      }
 
       try {
         const ext         = item.file.name.split('.').pop();
         const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const folderName  = event?.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
-        const storagePath = `${user.id}/${folderName}_photoselection/${fileName}`;
-
-        // ── Upload to iDrive e2 via presigned PUT URL ──
-        await uploadToIDrive(item.file, storagePath);
-
-        // Build a non-signed reference URL for the DB record
-        const refUrl = buildIDriveRefUrl(storagePath);
-
-        // Record metadata in Supabase DB
+        const folderName  = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+        const storagePath = `${user.id}/${folderName}/photoselection/${fileName}`;
+        await uploadToR2(item.compressed, storagePath);
+        const refUrl = buildR2RefUrl(storagePath);
         const { error: dbErr } = await supabase.from('photos').insert({
           event_id:     event.id,
           user_id:      user.id,
           storage_path: storagePath,
           file_name:    item.file.name,
-          size_bytes:   item.file.size,
-          supabase_url: refUrl,  // stores iDrive ref URL (signed URL generated on load)
-          source:       'host',  // photographer/host upload
+          size_bytes:   item.compressed.size,
+          supabase_url: refUrl,
+          source:       'host',
         });
-
         if (dbErr) throw new Error(dbErr.message);
-
-        setUploading(prev =>
-          prev.map(u => u.id === item.id ? { ...u, status: 'done', progress: 100 } : u),
-        );
+        const idx = remainingStash.findIndex(s => s.id === item.id);
+        if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
+        uploaded++;
+        setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round(((i + 1) / compressedItems.length) * 100), message: item.file.name });
       } catch (err) {
-        setUploading(prev =>
-          prev.map(u => u.id === item.id ? { ...u, status: 'error', error: err.message } : u),
-        );
+        showToast('error', 'Upload failed', `Failed to upload ${item.file.name}: ${err.message}`);
       }
     }
 
-    await fetchEvent();
-    setTimeout(() => {
-      setUploading(prev => prev.filter(u => u.status !== 'done'));
-    }, 3000);
-  }, [user, event, allPhotos, poolUsedBytes, subscription, fetchEvent]);
+    if (cancelled) {
+      setStagedFiles([]);
+      setSelectedFolderName(null);
+    }
 
-  const handleDrop      = useCallback((e) => { e.preventDefault(); setIsDragging(false); uploadFiles(Array.from(e.dataTransfer.files)); }, [uploadFiles]);
-  const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = ()  => setIsDragging(false);
-  const handleFilePick  = (e) => uploadFiles(Array.from(e.target.files));
+    cancelUploadRef.current = false;
+    setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
 
-  // Subscription-pool-aware storage metrics
-  const isPooled           = !!event?.subscription_id;
-  const storageUsedBytes   = isPooled ? poolUsedBytes : allPhotos.reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-  const limitGb            = isPooled ? (subscription?.storage_gb ?? event?.storage_gb ?? 1) : (event?.storage_gb ?? 1);
-  const storageLimitBytes  = limitGb * 1024 * 1024 * 1024;
-  const storagePercent     = Math.min(100, (storageUsedBytes / storageLimitBytes) * 100);
-  const quotaWarning       = storagePercent >= 90 && storagePercent < 100;
-  const quotaFull          = storagePercent >= 100;
-
-  const handleUpgraded = async (newStorageGb) => {
-    showToast('success', 'Plan Upgraded!', `Storage upgraded to ${newStorageGb} GB.`);
-    setShowUpgrade(false);
-    await fetchEvent();
+    if (uploaded > 0) {
+      if (!cancelled) setSelectedFolderName(null);
+      showToast('success', cancelled ? 'Upload Paused' : 'Upload Complete', `${uploaded} photo${uploaded !== 1 ? 's' : ''} added to the gallery.`);
+      await fetchEvent();
+    }
   };
 
+  const readEntryFiles = (entry) => new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file(f => resolve([f]));
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const allFiles = [];
+      const readBatch = () => {
+        reader.readEntries(async (entries) => {
+          if (!entries.length) return resolve(allFiles);
+          const nested = await Promise.all(entries.map(readEntryFiles));
+          allFiles.push(...nested.flat());
+          readBatch();
+        });
+      };
+      readBatch();
+    } else {
+      resolve([]);
+    }
+  });
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const items = Array.from(e.dataTransfer.items ?? []);
+    if (items.length && items[0].webkitGetAsEntry) {
+      const entries = items.map(i => i.webkitGetAsEntry()).filter(Boolean);
+      const nested  = await Promise.all(entries.map(readEntryFiles));
+      stageFiles(nested.flat());
+    } else {
+      stageFiles(Array.from(e.dataTransfer.files));
+    }
+  }, [stageFiles]);
+  const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = ()  => setIsDragging(false);
+  const handleFilePick  = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
+
+  const folderInputRef = useRef(null);
+  const [selectedFolderName, setSelectedFolderName] = useState(null);
+  const handleFolderPick = async () => {
+    if ('showDirectoryPicker' in window) {
+      try {
+        const dirHandle = await window.showDirectoryPicker();
+        const files = [];
+        for await (const entry of dirHandle.values()) {
+          if (entry.kind === 'file') {
+            const file = await entry.getFile();
+            if (file.type.startsWith('image/')) files.push(file);
+          }
+        }
+        if (files.length) {
+          setSelectedFolderName(dirHandle.name);
+          stageFiles(files);
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') console.error(err);
+      }
+    } else {
+      folderInputRef.current?.click();
+    }
+  };
+
+
+  const handleUnlockGuest = async (submissionId) => {
+    await supabase.from('guest_submissions').update({ is_locked: false }).eq('id', submissionId);
+    await fetchGuestSubmissions();
+  };
+
+  // Photo quota
+  const planLimit    = activePlan?.photos_limit ?? null;
+  const quotaFull    = planLimit ? photoCount >= planLimit : false;
+  const quotaPercent = planLimit ? Math.min(100, (photoCount / planLimit) * 100) : 0;
+  const quotaWarning = planLimit ? quotaPercent >= 90 && !quotaFull : false;
   const handleSavePassword = async () => {
     if (!event) return;
     setActionLoading({ loading: true, message: 'Saving Password...' });
@@ -433,11 +594,10 @@ export default function EventDetail() {
         try {
           const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
           
-          // 1. Delete from iDrive e2 (only iDrive photos; old Supabase photos skip cleanly)
-          const idrivePaths = selectedPhotos
+          const r2Paths = selectedPhotos
             .filter(p => !p.supabase_url?.includes('supabase.co'))
             .map(p => p.storage_path);
-          if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
+          if (r2Paths.length) await deleteFromR2(r2Paths);
 
           // 2. Delete old Supabase Storage photos (if any still selected)
           const supaPaths = selectedPhotos
@@ -484,11 +644,10 @@ export default function EventDetail() {
         closeConfirm();
         setActionLoading({ loading: true, message: `Clearing all ${photos.length} photos…` });
         try {
-          // 1. Delete from R2/iDrive
-          const idrivePaths = photos
+          const r2Paths = photos
             .filter(p => p.storage_path && !p.supabase_url?.includes('supabase.co'))
             .map(p => p.storage_path);
-          if (idrivePaths.length) await deleteFromIDrive(idrivePaths);
+          if (r2Paths.length) await deleteFromR2(r2Paths);
 
           // 2. Delete old Supabase Storage photos
           const supaPaths = photos
@@ -611,13 +770,25 @@ export default function EventDetail() {
     <DashboardLayout>
       <div className="max-w-5xl mx-auto py-6">
 
-        {/* Back */}
+        {/* Back button */}
         <button
           onClick={() => navigate(`/events/${id}`)}
-          className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-teal-700 mb-6 transition-colors"
+          className="flex items-center gap-2 text-sm font-semibold text-zinc-500 hover:text-teal-700 mb-5 transition-colors group"
         >
-          <ArrowLeft size={16} /> Back to Event
+          <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
+          Back to Event
         </button>
+
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
+          <button onClick={() => navigate('/studio')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Dashboard</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <button onClick={() => navigate('/events')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Events</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <button onClick={() => navigate(`/events/${id}`)} className="hover:text-teal-700 hover:underline transition-colors truncate max-w-[150px]">{event.name}</button>
+          <span className="text-zinc-300 shrink-0">/</span>
+          <span className="text-zinc-900 font-bold shrink-0">Photo Selection</span>
+        </nav>
 
         {/* Event Header */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-6">
@@ -634,143 +805,58 @@ export default function EventDetail() {
               </div>
             </div>
 
-            <div className="flex gap-4 items-stretch">
-              {/* Storage quota */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
+            {/* Photo count badge */}
+            <div className="flex gap-3 items-stretch">
+              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[130px]">
                 <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
-                  <HardDrive size={14} className="text-teal-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest">
-                    {isPooled ? 'Shared Pool' : 'Storage'}
-                  </p>
+                  <Images size={14} className="text-teal-600" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Photos</p>
                 </div>
-                <div className="flex items-baseline gap-1">
-                  <p className="text-lg font-bold text-zinc-900">{formatBytes(storageUsedBytes)}</p>
-                  <p className="text-[11px] font-semibold text-zinc-400">/ {limitGb} GB</p>
-                </div>
-                {isPooled && (
-                  <p className="text-[10px] text-zinc-400 leading-tight">across all events</p>
-                )}
-                <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-teal-500'}`}
-                    style={{ width: `${storagePercent}%` }}
-                  />
-                </div>
+                <p className="text-2xl font-black text-zinc-900">{photos.length.toLocaleString()}</p>
+                <p className="text-[10px] text-zinc-400 mt-0.5">in this event</p>
               </div>
 
-              {/* Upgrade button — hidden for subscription pool events */}
-              {!showUpgrade && !isPooled && (
-                <button
-                  onClick={() => setShowUpgrade(true)}
-                  className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50/40 hover:bg-teal-50 hover:border-teal-400 hover:shadow-md transition-all active:scale-95"
-                >
-                  <ArrowUp size={14} className="mb-[-2px]" />
-                  <span>Upgrade Plan</span>
-                </button>
-              )}
-
-              {/* Upgrade button for subscription pool events */}
-              {!showMonthlyUpgrade && isPooled && (
-                <button
-                  onClick={() => setShowMonthlyUpgrade(true)}
-                  className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50/40 hover:bg-teal-50 hover:border-teal-400 hover:shadow-md transition-all active:scale-95"
-                >
-                  <ArrowUp size={14} className="mb-[-2px]" />
-                  <span>Upgrade Plan</span>
-                </button>
+              {activePlan && (
+                <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[140px]">
+                  <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
+                    <Images size={14} className={quotaFull ? 'text-red-500' : quotaWarning ? 'text-amber-500' : 'text-violet-500'} />
+                    <p className="text-[10px] font-bold uppercase tracking-widest">Total Used</p>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <p className={`text-2xl font-black ${quotaFull ? 'text-red-600' : 'text-zinc-900'}`}>{photoCount.toLocaleString()}</p>
+                    <p className="text-[11px] font-semibold text-zinc-400">/ {planLimit?.toLocaleString()}</p>
+                  </div>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">across all events</p>
+                </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Quota warning / full banners */}
-        {/* Quota full banner */}
-        {quotaFull && !showUpgrade && (
-          <div className="flex items-center justify-between gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
-            <div>
-              <p className="text-sm font-bold text-red-700">📛 Storage limit reached</p>
-              <p className="text-xs text-red-500 mt-0.5">
-                {isPooled
-                  ? `Your ${limitGb} GB shared pool is full. Upgrade your monthly plan for more storage.`
-                  : `You've used all ${limitGb} GB. Upgrade to continue uploading.`
-                }
-              </p>
-            </div>
-            {isPooled ? (
-              <button
-                onClick={() => navigate('/pricing?tab=monthly')}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold silk-gradient text-white shadow hover:opacity-90 active:scale-95 transition-all"
-              >
-                <ArrowUp size={12} /> Upgrade Plan
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowUpgrade(true)}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold silk-gradient text-white shadow hover:opacity-90 active:scale-95 transition-all"
-              >
-                <ArrowUp size={12} /> Upgrade Now
-              </button>
-            )}
+        {/* Photo quota banners */}
+        {quotaFull && (
+          <div className="flex items-center gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
+            <p className="text-sm font-bold text-red-700">📛 Photo limit reached — {photoCount.toLocaleString()} / {planLimit?.toLocaleString()} used. Contact support for options.</p>
+          </div>
+        )}
+        {quotaWarning && !quotaFull && (
+          <div className="flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
+            <p className="text-sm font-bold text-amber-700">⚠️ Approaching photo limit — {photoCount.toLocaleString()} of {planLimit?.toLocaleString()} used</p>
           </div>
         )}
 
-        {/* Quota warning banner */}
-        {quotaWarning && !quotaFull && !showUpgrade && (
-          <div className="flex items-center justify-between gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
-            <div>
-              <p className="text-sm font-bold text-amber-700">⚠️ Storage almost full</p>
-              <p className="text-xs text-amber-600 mt-0.5">
-                {formatBytes(storageUsedBytes)} of {limitGb} GB used
-                {isPooled ? ' — shared pool running low.' : ' — consider upgrading soon.'}
-              </p>
-            </div>
-            {isPooled ? (
-              <button
-                onClick={() => navigate('/pricing?tab=monthly')}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
-              >
-                <ArrowUp size={12} /> Upgrade Plan
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowUpgrade(true)}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-700 hover:bg-amber-100 transition-all"
-              >
-                <ArrowUp size={12} /> Add More
-              </button>
-            )}
+        {/* Live Status Banner */}
+        <div className={`flex items-center gap-3 p-4 rounded-xl mb-6 ${event.is_public ? 'bg-green-50 border border-green-100' : 'bg-zinc-50 border border-zinc-100'}`}>
+          <div className={`w-3 h-3 rounded-full shrink-0 ${event.is_public ? 'bg-green-500 animate-pulse' : 'bg-zinc-300'}`} />
+          <div>
+            <p className={`text-sm font-bold ${event.is_public ? 'text-green-700' : 'text-zinc-500'}`}>
+              {event.is_public ? 'Photo Selection is LIVE' : 'Photo Selection is OFFLINE'}
+            </p>
+            <p className="text-[10px] text-zinc-400">
+              {event.is_public ? 'Guests can access via the guest link' : 'Toggle Guest Link on to make it accessible'}
+            </p>
           </div>
-        )}
-
-        {/* Monthly Upgrade Panel — for subscription pool events */}
-        {showMonthlyUpgrade && isPooled && subscription && (
-          <MonthlyUpgradePlan
-            subscription={subscription}
-            user={user}
-            onUpgraded={(newGb) => {
-              setShowMonthlyUpgrade(false);
-              showToast('success', 'Plan Upgraded!', `Monthly pool storage upgraded to ${newGb} GB.`);
-              // Re-fetch subscription so limitGb updates
-              supabase
-                .from('subscriptions')
-                .select('*')
-                .eq('id', event.subscription_id)
-                .single()
-                .then(({ data }) => { if (data) setSubscription(data); });
-            }}
-            onClose={() => setShowMonthlyUpgrade(false)}
-          />
-        )}
-
-        {/* Per-event Upgrade Panel */}
-        {showUpgrade && !isPooled && (
-          <UpgradePlan
-            event={event}
-            user={user}
-            onUpgraded={handleUpgraded}
-            onClose={() => setShowUpgrade(false)}
-          />
-        )}
+        </div>
 
         {/* Sharing & Privacy */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -873,10 +959,10 @@ export default function EventDetail() {
               </div>
               <button 
                 onClick={handleSavePassword}
-                disabled={isSavingPassword || tempPassword === (event.password || '')}
+                disabled={actionLoading.loading || tempPassword === (event.password || '')}
                 className="px-6 py-2.5 rounded-xl silk-gradient text-white text-xs font-black disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all active:scale-95 shadow-lg shadow-teal-500/10"
               >
-                {isSavingPassword ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
+                {actionLoading.loading ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
               </button>
             </div>
           </div>
@@ -887,7 +973,7 @@ export default function EventDetail() {
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
-          onClick={() => !quotaFull && fileInputRef.current?.click()}
+          onClick={() => !quotaFull && uploadState.phase === 'idle' && fileInputRef.current?.click()}
           className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-200 mb-6 ${
             quotaFull
               ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60'
@@ -907,14 +993,23 @@ export default function EventDetail() {
               <p className="text-sm text-zinc-500 mt-1">or click to browse · Max 50 MB per photo · JPG, PNG, WEBP, HEIC</p>
             </div>
             {!quotaFull && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                className="silk-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md hover:opacity-90 active:scale-95 transition-all"
-              >
-                <Upload size={14} className="inline mr-1.5" />
-                Select Photos
-              </button>
+              <div className="flex gap-3" onClick={e => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="silk-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md hover:opacity-90 active:scale-95 transition-all flex items-center gap-2"
+                >
+                  <Upload size={14} /> Select Photos
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFolderPick}
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold border-2 border-teal-200 text-teal-700 bg-white hover:border-teal-400 active:scale-95 transition-all flex items-center gap-2 max-w-[180px]"
+                >
+                  <FolderOpen size={14} className="shrink-0" />
+                  <span className="truncate">{selectedFolderName ?? 'Select Folder'}</span>
+                </button>
+              </div>
             )}
           </div>
           <input
@@ -925,20 +1020,188 @@ export default function EventDetail() {
             className="hidden"
             onChange={handleFilePick}
           />
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            // @ts-ignore
+            webkitdirectory="true"
+            onChange={(e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; }}
+          />
         </div>
 
-        {/* Upload Queue */}
-        {uploading.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-zinc-900">Uploading Photos</h3>
-              <button onClick={() => setUploading([])} className="text-zinc-400 hover:text-zinc-600 transition-colors">
-                <X size={16} />
-              </button>
+
+        {/* Upload Progress */}
+        {uploadState.phase !== 'idle' && uploadState.total > 0 && (
+          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-6 animate-in fade-in duration-300 border border-teal-100">
+
+            {/* Phase tabs */}
+            <div className="flex items-center gap-2 mb-5">
+              {[
+                { key: 'compressing', label: 'Compressing', color: 'amber' },
+                { key: 'uploading',   label: 'Uploading',   color: 'teal'  },
+              ].map(({ key, label, color }) => {
+                const isActive = uploadState.phase === key;
+                const isDone   = key === 'compressing' && uploadState.phase === 'uploading';
+                return (
+                  <div key={key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                    isActive
+                      ? color === 'amber'
+                        ? 'bg-amber-50 border-amber-200 text-amber-700'
+                        : 'bg-teal-50 border-teal-200 text-teal-700'
+                      : isDone
+                      ? 'bg-green-50 border-green-200 text-green-600'
+                      : 'bg-zinc-50 border-zinc-200 text-zinc-400'
+                  }`}>
+                    {isDone
+                      ? <CheckCircle size={12} />
+                      : isActive
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <div className="w-3 h-3 rounded-full border-2 border-current opacity-40" />
+                    }
+                    {label}
+                  </div>
+                );
+              })}
+              <div className="ml-auto">
+                <button
+                  onClick={() => { cancelUploadRef.current = true; }}
+                  className="px-4 py-1.5 text-xs font-bold text-red-500 border border-red-200 hover:bg-red-50 rounded-full transition-all active:scale-95"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-            <div className="space-y-2">
-              {uploading.map(item => (
-                <UploadItem key={item.id} item={item} />
+
+            {/* Current file */}
+            <p className="text-xs text-zinc-400 truncate mb-3">
+              {uploadState.phase === 'compressing' ? 'Compressing' : 'Uploading'}:{' '}
+              <span className="text-zinc-600 font-medium">{uploadState.message}</span>
+            </p>
+
+            {/* Progress bar */}
+            <div className="relative h-3 rounded-full overflow-hidden bg-zinc-100 border border-zinc-200/60">
+              <div
+                className={`absolute top-0 bottom-0 left-0 rounded-full transition-all duration-300 ${
+                  uploadState.phase === 'compressing'
+                    ? 'bg-gradient-to-r from-amber-400 to-orange-400'
+                    : 'silk-gradient'
+                }`}
+                style={{ width: `${uploadState.percent}%` }}
+              />
+            </div>
+
+            {/* Counter + percent */}
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-xs text-zinc-400">
+                {uploadState.current} <span className="text-zinc-300">/ {uploadState.total}</span> photos
+              </p>
+              <p className={`text-sm font-black ${uploadState.phase === 'compressing' ? 'text-amber-500' : 'text-teal-600'}`}>
+                {uploadState.percent}%
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Staged Files */}
+        {uploadState.phase === 'idle' && stagedFiles.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 mb-6 animate-in fade-in duration-300">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-zinc-900 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-black">{stagedFiles.length}</span>
+                  Photos Ready to Upload
+                  {planLimit !== null && (stagedFiles.length + photoCount > planLimit) && (
+                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-black animate-in fade-in duration-200">
+                      <X size={10} strokeWidth={3} />
+                      {stagedFiles.length + photoCount - planLimit} to remove
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">Images will be auto-compressed before upload.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => { setStagedFiles([]); setSelectedFolderName(null); }} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-red-500 hover:bg-zinc-50 rounded-xl transition-all">
+                  Clear All
+                </button>
+                <button onClick={startUpload} className="flex items-center gap-2 px-6 py-2 rounded-xl silk-gradient text-white shadow-md text-sm font-bold active:scale-95 transition-all">
+                  <CloudUpload size={16} /> Upload Now
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[300px] overflow-y-auto pr-2">
+              {stagedFiles.map(staged => (
+                <div key={staged.id} className="relative aspect-square rounded-xl bg-zinc-100 overflow-hidden group">
+                  <div className="absolute top-1 right-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeStagedFile(staged.id); }}
+                      className="w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-500 transition-colors"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  {staged.previewUrl
+                    ? <img src={staged.previewUrl} alt="" className="w-full h-full object-cover" />
+                    : <ImageIcon className="w-full h-full p-4 text-zinc-300" />
+                  }
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Guest Submissions */}
+        {guestSubmissions.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-6">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center text-violet-600">
+                <Users size={16} />
+              </div>
+              <h2 className="text-xl font-bold tracking-tight text-zinc-900">Guest Submissions</h2>
+              <span className="ml-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-violet-100 text-violet-600">{guestSubmissions.length}</span>
+            </div>
+            <div className="space-y-3">
+              {guestSubmissions.map(sub => (
+                <div key={sub.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-zinc-50 border border-zinc-100">
+                  <div>
+                    <p className="font-bold text-zinc-900">{sub.guest_name || 'Anonymous Guest'}</p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-zinc-400">
+                      <span className="flex items-center gap-1">
+                        <Heart size={11} className="text-pink-400" fill="currentColor" />
+                        {sub.photo_count} photo{sub.photo_count !== 1 ? 's' : ''} selected
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <CalendarDays size={11} />
+                        {new Date(sub.submitted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock size={11} />
+                        {new Date(sub.submitted_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {sub.is_locked ? (
+                      <span className="flex items-center gap-1 text-[10px] font-bold bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full uppercase tracking-widest">
+                        <Lock size={10} /> Locked
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[10px] font-bold bg-green-100 text-green-700 px-2.5 py-1 rounded-full uppercase tracking-widest">
+                        Re-selection Open
+                      </span>
+                    )}
+                    {sub.is_locked && (
+                      <button
+                        onClick={() => handleUnlockGuest(sub.id)}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-all active:scale-95"
+                      >
+                        <RotateCcw size={13} /> Allow Re-selection
+                      </button>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -956,7 +1219,7 @@ export default function EventDetail() {
               All Photos
               {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-teal-600 rounded-full" />}
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('selected')}
               className={`pb-4 text-sm font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'selected' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
@@ -966,6 +1229,16 @@ export default function EventDetail() {
               </div>
               {activeTab === 'selected' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full" />}
             </button>
+            <button
+              onClick={() => setActiveTab('comments')}
+              className={`pb-4 text-sm font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'comments' ? 'text-amber-500' : 'text-zinc-400 hover:text-zinc-600'}`}
+            >
+              Comments
+              <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'comments' ? 'bg-amber-100 text-amber-600' : 'bg-zinc-100 text-zinc-400'}`}>
+                {Object.keys(photoComments).length}
+              </div>
+              {activeTab === 'comments' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500 rounded-full" />}
+            </button>
           </div>
 
           <div className="flex items-center justify-between mb-6">
@@ -973,7 +1246,7 @@ export default function EventDetail() {
               <h2 className="text-xl font-bold tracking-tight text-zinc-900">
                 {activeTab === 'all' ? 'Event Gallery' : 'Guest Favorites'}
               </h2>
-              {photos.length > 0 && (
+              {showGallery && photos.length > 0 && (
                 <button 
                   onClick={handleSelectAll}
                   className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-teal-600 transition-colors"
@@ -985,7 +1258,7 @@ export default function EventDetail() {
             </div>
             
             {/* Selection Actions Bar — shown when items are selected */}
-            {selectedIds.size > 0 && (
+            {showGallery && selectedIds.size > 0 && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
                 <span className="text-xs font-bold text-zinc-500 mr-2">{selectedIds.size} Selected</span>
                 {activeTab === 'selected' && (
@@ -1000,18 +1273,18 @@ export default function EventDetail() {
                 {activeTab === 'all' && (
                   <button 
                     onClick={handleDeleteSelected}
-                    disabled={isDeleting}
+                    disabled={actionLoading.loading}
                     className="p-2 rounded-lg bg-zinc-50 text-zinc-600 hover:bg-red-50 hover:text-red-600 transition-all shadow-sm disabled:opacity-50"
                     title="Delete Selected"
                   >
-                    {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                    {actionLoading.loading ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                   </button>
                 )}
               </div>
             )}
 
-            {/* Clear All Photos — shown only when photos exist and nothing is selected */}
-            {photos.length > 0 && selectedIds.size === 0 && (
+            {/* Clear All Photos — shown only when gallery is visible, photos exist and nothing is selected */}
+            {showGallery && photos.length > 0 && selectedIds.size === 0 && (
               <button
                 onClick={handleClearAllPhotos}
                 disabled={!!actionLoading.loading}
@@ -1026,7 +1299,103 @@ export default function EventDetail() {
             )}
           </div>
 
-          {photos.length === 0 ? (
+          {!showGallery ? (
+            <div className="flex flex-col items-center justify-center py-20 bg-zinc-50/50 rounded-xl border border-zinc-100">
+              <Images size={40} className="text-teal-200 mb-4" />
+              <p className="text-zinc-600 font-medium mb-1">Gallery preview hidden</p>
+              <p className="text-xs text-zinc-400 mb-6 max-w-sm text-center">Click below to load and view uploaded photos.</p>
+              <button onClick={() => setShowGallery(true)} className="px-6 py-2.5 rounded-xl silk-gradient text-white font-bold text-sm hover:opacity-90 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                <Eye size={16} /> View Photos
+              </button>
+            </div>
+          ) : activeTab === 'comments' ? (
+            (() => {
+              const commented = photos
+                .filter(p => (photoComments[p.id]?.length || 0) > 0)
+                .sort((a, b) => {
+                  const aLatest = photoComments[a.id]?.at(-1)?.created_at ?? '';
+                  const bLatest = photoComments[b.id]?.at(-1)?.created_at ?? '';
+                  return bLatest.localeCompare(aLatest);
+                });
+              return commented.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
+                  <MessageCircle size={40} className="mb-3 opacity-30" />
+                  <p className="font-medium">No comments yet</p>
+                  <p className="text-sm mt-1">Guests can leave feedback on photos from the guest view</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {commented.map((photo, commentIdx) => (
+                    <div key={photo.id} className="rounded-2xl border border-zinc-100 overflow-hidden">
+                      {/* Photo header */}
+                      <div className="flex items-center gap-3 px-4 py-3 bg-zinc-50 border-b border-zinc-100">
+                        <div className="w-6 h-6 rounded-lg bg-zinc-200 flex items-center justify-center shrink-0">
+                          <span className="text-[10px] font-black text-zinc-500">{commentIdx + 1}</span>
+                        </div>
+                        <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-zinc-200">
+                          {getPhotoUrl(photo)
+                            ? <img src={getPhotoUrl(photo)} alt={photo.file_name} className="w-full h-full object-cover" />
+                            : <ImageIcon className="w-full h-full p-2 text-zinc-300" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-zinc-700 truncate">{photo.file_name}</p>
+                          <p className="text-[10px] text-zinc-400">{photoComments[photo.id].length} message{photoComments[photo.id].length !== 1 ? 's' : ''}</p>
+                        </div>
+                        <button
+                          onClick={() => { setReplacingPhotoId(photo.id); replaceInputRef.current?.click(); }}
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-all active:scale-95"
+                        >
+                          <Upload size={12} /> Replace Photo
+                        </button>
+                      </div>
+
+                      {/* Thread messages */}
+                      <div className="p-4 space-y-3 max-h-64 overflow-y-auto bg-white">
+                        {photoComments[photo.id].map(msg => {
+                          const isMe = msg.sender_type === 'photographer';
+                          return (
+                            <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm leading-snug ${isMe ? 'bg-teal-500 text-white rounded-br-sm' : 'bg-zinc-100 text-zinc-800 rounded-bl-sm'}`}>
+                                <p className={`text-[10px] font-bold mb-0.5 ${isMe ? 'text-teal-100' : 'text-zinc-400'}`}>
+                                  {isMe ? 'You (Photographer)' : (msg.sender_name || 'Guest')}
+                                </p>
+                                <p>{msg.message}</p>
+                                <p className={`text-[9px] mt-1 ${isMe ? 'text-teal-100' : 'text-zinc-400'}`}>
+                                  {new Date(msg.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                  {' · '}
+                                  {new Date(msg.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Reply box */}
+                      <div className="px-4 py-3 border-t border-zinc-100 bg-white flex gap-2">
+                        <input
+                          value={replyDraft[photo.id] || ''}
+                          onChange={e => setReplyDraft(prev => ({ ...prev, [photo.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handlePhotographerReply(photo.id); } }}
+                          placeholder="Reply to guest..."
+                          className="flex-1 bg-zinc-50 border border-zinc-100 rounded-xl px-3 py-2 text-sm outline-none focus:border-teal-400 transition-colors"
+                        />
+                        <button
+                          onClick={() => handlePhotographerReply(photo.id)}
+                          disabled={sendingReply === photo.id || !(replyDraft[photo.id] || '').trim()}
+                          className="px-4 py-2 rounded-xl bg-teal-500 text-white text-xs font-bold disabled:opacity-40 hover:bg-teal-600 transition-all active:scale-95 flex items-center gap-1.5 shrink-0"
+                        >
+                          {sendingReply === photo.id
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <><Send size={13} /> Reply</>}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()
+          ) : photos.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
               <ImageIcon size={40} className="mb-3 opacity-30" />
               <p className="font-medium">No photos yet</p>
@@ -1036,7 +1405,7 @@ export default function EventDetail() {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
               {photos
                 .filter(photo => activeTab === 'all' || (photo.likes_count || 0) > 0)
-                .map(photo => (
+                .map((photo, idx) => (
                 <div
                   key={photo.id}
                   className={`group relative aspect-square rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${selectedIds.has(photo.id) ? 'ring-4 ring-teal-500/20' : 'bg-zinc-100'}`}
@@ -1054,11 +1423,36 @@ export default function EventDetail() {
                     </div>
                   )}
 
-                  {/* Heart Badge (Admin only) */}
+                  {/* Number badge — only in Guest Selections tab */}
+                  {activeTab === 'selected' && (
+                    <div className="absolute bottom-2 left-2 z-10 w-6 h-6 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center">
+                      <span className="text-[10px] font-black text-white leading-none">{idx + 1}</span>
+                    </div>
+                  )}
+
+                  {/* Pencil replace button — All tab only, top-left, shows on hover */}
+                  {activeTab === 'all' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setReplacingPhotoId(photo.id); replaceInputRef.current?.click(); }}
+                      className="absolute top-2 left-2 z-20 w-7 h-7 rounded-lg bg-black/50 backdrop-blur-sm text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-teal-500 active:scale-95"
+                      title="Replace photo"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
+
+                  {/* Heart Badge */}
                   {(photo.likes_count || 0) > 0 && (
                     <div className="absolute top-2 left-2 z-10 px-1.5 py-1 rounded-lg bg-white/90 backdrop-blur-md shadow-sm border border-pink-100 flex items-center gap-1 animate-in zoom-in duration-300">
                       <Heart size={10} className="text-pink-500" fill="currentColor" />
                       <span className="text-[10px] font-black text-pink-600">{photo.likes_count}</span>
+                    </div>
+                  )}
+                  {/* Comment Badge */}
+                  {(photoComments[photo.id]?.length || 0) > 0 && (
+                    <div className="absolute top-2 right-2 z-10 px-1.5 py-1 rounded-lg bg-white/90 backdrop-blur-md shadow-sm border border-amber-100 flex items-center gap-1 animate-in zoom-in duration-300">
+                      <MessageCircle size={10} className="text-amber-500" fill="currentColor" />
+                      <span className="text-[10px] font-black text-amber-600">{photoComments[photo.id].length}</span>
                     </div>
                   )}
 
@@ -1067,7 +1461,7 @@ export default function EventDetail() {
                     className={`absolute inset-0 transition-opacity duration-200 cursor-pointer ${selectedIds.has(photo.id) ? 'bg-teal-500/20 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'}`}
                   >
                     {/* Checkbox Trigger Area */}
-                    <div className="absolute top-3 right-3">
+                    <div className="absolute bottom-3 right-3">
                       <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedIds.has(photo.id) ? 'bg-teal-500 border-teal-500 text-white' : 'bg-white/20 border-white/40'}`}>
                         {selectedIds.has(photo.id) && <Check size={14} />}
                       </div>
@@ -1085,6 +1479,15 @@ export default function EventDetail() {
         </div>
       </div>
 
+      {/* Hidden input for replacing a single photo — outside all click zones */}
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleReplacePhoto}
+      />
+
       {toast && (
         <Toast
           type={toast.type}
@@ -1092,6 +1495,32 @@ export default function EventDetail() {
           message={toast.message}
           onClose={() => setToast(null)}
         />
+      )}
+
+      {/* Quota Exceeded Modal */}
+      {quotaModal.show && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setQuotaModal(m => ({ ...m, show: false }))} />
+          <div className="relative bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-300">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center mx-auto mb-5">
+              <AlertCircle size={24} className="text-amber-500" />
+            </div>
+            <h2 className="text-lg font-black text-zinc-900 text-center mb-3">Photo Limit Exceeded</h2>
+            <p className="text-sm text-zinc-500 text-center mb-1">
+              You can upload only <span className="font-bold text-teal-600">{quotaModal.canUpload}</span> more photo{quotaModal.canUpload !== 1 ? 's' : ''} in your plan.
+            </p>
+            <p className="text-sm text-zinc-500 text-center mb-6">
+              You selected <span className="font-bold text-zinc-800">{quotaModal.trying}</span> photos. Please remove{' '}
+              <span className="font-bold text-red-600">{quotaModal.excess}</span> photo{quotaModal.excess !== 1 ? 's' : ''} from the staging area and try again.
+            </p>
+            <button
+              onClick={() => setQuotaModal(m => ({ ...m, show: false }))}
+              className="w-full py-3 rounded-xl silk-gradient text-white font-bold text-sm transition-all active:scale-95"
+            >
+              OK, I'll remove some
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Confirm Modal */}

@@ -38,11 +38,6 @@ serve(async (req: Request) => {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
-      plan,
-      amountPaise,
-      customLabel,
-      eventId,
-      additionalPhotos,
     } = await req.json();
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
@@ -53,7 +48,7 @@ serve(async (req: Request) => {
 
     // Verify HMAC-SHA256 signature
     const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')!;
-    const body      = `${razorpay_order_id}|${razorpay_payment_id}`;
+    const bodyStr   = `${razorpay_order_id}|${razorpay_payment_id}`;
 
     const key = await crypto.subtle.importKey(
       'raw',
@@ -64,7 +59,7 @@ serve(async (req: Request) => {
     );
 
     const signatureBytes = await crypto.subtle.sign(
-      'HMAC', key, new TextEncoder().encode(body)
+      'HMAC', key, new TextEncoder().encode(bodyStr)
     );
 
     const computedHex = new TextDecoder().decode(
@@ -82,43 +77,43 @@ serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // Mark purchase as paid and retrieve it
-    const { data: purchase, error: updateError } = await supabaseAdmin
-      .from('purchases')
+    // Update user_plan: mark as active, set payment ID and dates
+    const { data: userPlan, error: updateError } = await supabaseAdmin
+      .from('user_plans')
       .update({
         razorpay_payment_id,
-        status: 'paid',
+        status:     'active',
+        start_date: new Date().toISOString(),
       })
       .eq('razorpay_order_id', razorpay_order_id)
       .eq('user_id', user.id)
       .select()
       .single();
 
-    if (updateError || !purchase) {
+    if (updateError || !userPlan) {
       console.error('DB update error:', updateError);
       return new Response(JSON.stringify({ error: 'Failed to record payment' }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // If upgrade payment: bump the event's photos_limit
-    if (eventId && additionalPhotos) {
-      const { error: eventErr } = await supabaseAdmin.rpc('increment_event_photos_limit', {
-        p_event_id:   eventId,
-        p_additional: additionalPhotos,
-      });
-      if (eventErr) {
-        console.error('Event upgrade error:', eventErr);
-      }
-    }
+    // Update the end_date based on actual start_date
+    const endDate = new Date(
+      new Date(userPlan.start_date).getTime() + userPlan.duration_days * 86400000
+    ).toISOString();
+
+    await supabaseAdmin
+      .from('user_plans')
+      .update({ end_date: endDate })
+      .eq('id', userPlan.id);
 
     return new Response(JSON.stringify({
-      success:     true,
-      purchaseId:  purchase.id,
-      plan:        purchase.plan,
-      photosLimit: purchase.photos_limit,
-      storageGb:   purchase.storage_gb,
-      customLabel: purchase.custom_label ?? null,
+      success:      true,
+      planId:       userPlan.id,
+      planKey:      userPlan.plan_key,
+      photosLimit:  userPlan.photos_limit,
+      durationDays: userPlan.duration_days,
+      endDate,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

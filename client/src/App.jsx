@@ -17,6 +17,7 @@ import GuestEventView from './pages/GuestEventView';
 import QRUpload from './pages/QRUpload';
 import GuestUpload from './pages/GuestUpload';
 import QRView from './pages/QRView';
+import Payments from './pages/Payments';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
       <Route path="/studio" element={<ProtectedRoute><Studio /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
       <Route path="/pricing" element={<ProtectedRoute><Pricing /></ProtectedRoute>} />
+      <Route path="/payments" element={<ProtectedRoute><Payments /></ProtectedRoute>} />
       <Route path="/events" element={<ProtectedRoute><Events /></ProtectedRoute>} />
       <Route path="/createevent" element={<ProtectedRoute><CreateEvent /></ProtectedRoute>} />
       <Route path="/events/:id" element={<ProtectedRoute><EventLanding /></ProtectedRoute>} />

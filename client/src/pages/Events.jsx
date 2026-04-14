@@ -4,17 +4,8 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  CalendarDays, HardDrive, Plus,
-  ChevronRight, Loader2, FolderOpen,
+  CalendarDays, Images, Plus, ChevronRight, Loader2, FolderOpen, Tag,
 } from 'lucide-react';
-
-function formatBytes(bytes) {
-  if (!bytes) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function formatDate(d) {
   if (!d) return '—';
@@ -28,41 +19,41 @@ export default function Events() {
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
 
-  const [events, setEvents]   = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [events,     setEvents]     = useState([]);
+  const [photoCounts, setPhotoCounts] = useState({}); // { eventId: count }
+  const [loading,    setLoading]    = useState(true);
 
   useEffect(() => {
     if (!user) return;
     (async () => {
       setLoading(true);
-      // fetch events + photo count + used storage via aggregate
+
       const { data } = await supabase
         .from('events')
-        .select('id, name, type, date, photos_limit, storage_gb, created_at, purchase_id, purchases(plan)')
+        .select('id, name, type, date, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      setEvents(data ?? []);
+      const evList = data ?? [];
+      setEvents(evList);
+
+      // Fetch photo counts for all events in one query
+      if (evList.length > 0) {
+        const { data: photoData } = await supabase
+          .from('photos')
+          .select('event_id')
+          .in('event_id', evList.map(e => e.id));
+
+        const counts = {};
+        for (const p of photoData ?? []) {
+          counts[p.event_id] = (counts[p.event_id] ?? 0) + 1;
+        }
+        setPhotoCounts(counts);
+      }
+
       setLoading(false);
     })();
   }, [user]);
-
-  const [storageUsed, setStorageUsed] = useState({});  // { eventId: bytes }
-  useEffect(() => {
-    if (!user || !events.length) return;
-    (async () => {
-      const { data } = await supabase
-        .from('photos')
-        .select('event_id, size_bytes')
-        .in('event_id', events.map(e => e.id));
-      const usage = {};
-      for (const p of data ?? []) {
-        usage[p.event_id] = (usage[p.event_id] ?? 0) + (p.size_bytes || 0);
-      }
-      setStorageUsed(usage);
-    })();
-  }, [user, events]);
-
 
   return (
     <DashboardLayout>
@@ -91,7 +82,7 @@ export default function Events() {
           <div className="flex flex-col items-center justify-center py-32 text-zinc-400">
             <FolderOpen size={52} className="mb-4 opacity-25" />
             <p className="text-lg font-bold text-zinc-600 mb-1">No events yet</p>
-            <p className="text-sm mb-6">Create your first event by choosing a plan.</p>
+            <p className="text-sm mb-6">Create your first event to start uploading photos.</p>
             <button
               onClick={() => navigate('/createevent')}
               className="silk-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md hover:opacity-90 active:scale-95 transition-all"
@@ -101,55 +92,44 @@ export default function Events() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {events.map(event => (
-              <div
-                key={event.id}
-                onClick={() => navigate(`/events/${event.id}`)}
-                className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] border border-zinc-100 p-6 cursor-pointer hover:-translate-y-1 hover:shadow-xl transition-all duration-200 group"
-              >
-                {/* Top row */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-teal-600">
-                        {event.type}
-                      </p>
-                      {/* Plan tag */}
-                      {(() => {
-                        const plan = event.purchases?.plan;
-                        const s = {
-                          basic:   { bg: '#f3f3f4', color: '#3d4947', label: 'Starter Plan' },
-                          pro:     { bg: '#89f5e7', color: '#00685f', label: 'Professional Plan' },
-                          premium: { bg: '#ffdbcf', color: '#85513e', label: 'Elite Plan' },
-                        }[plan];
-                        return s ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: s.bg, color: s.color }}>
-                            {s.label}
-                          </span>
-                        ) : null;
-                      })()}
+            {events.map(event => {
+              const count = photoCounts[event.id] ?? 0;
+              return (
+                <div
+                  key={event.id}
+                  onClick={() => navigate(`/events/${event.id}`)}
+                  className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] border border-zinc-100 p-6 cursor-pointer hover:-translate-y-1 hover:shadow-xl transition-all duration-200 group"
+                >
+                  {/* Top row */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-teal-600">
+                          <Tag size={10} /> {event.type}
+                        </span>
+                      </div>
+                      <h2 className="text-lg font-bold text-zinc-900 leading-tight truncate">{event.name}</h2>
                     </div>
-                    <h2 className="text-lg font-bold text-zinc-900 leading-tight truncate">{event.name}</h2>
+                    <ChevronRight
+                      size={18}
+                      className="text-zinc-300 group-hover:text-teal-500 transition-colors mt-1 shrink-0 ml-2"
+                    />
                   </div>
-                  <ChevronRight
-                    size={18}
-                    className="text-zinc-300 group-hover:text-teal-500 transition-colors mt-1 shrink-0 ml-2"
-                  />
-                </div>
 
-                {/* Date + photo count */}
-                <div className="flex items-center justify-between mt-3">
-                  <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                    <CalendarDays size={13} />
-                    {formatDate(event.date)}
+                  {/* Date + photo count */}
+                  <div className="flex items-center justify-between mt-4">
+                    <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                      <CalendarDays size={13} />
+                      {formatDate(event.date)}
+                    </div>
+                    <span className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full">
+                      <Images size={11} />
+                      {count.toLocaleString()} {count === 1 ? 'photo' : 'photos'}
+                    </span>
                   </div>
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full">
-                    <HardDrive size={11} />
-                    {formatBytes(storageUsed[event.id] ?? 0)} / {event.storage_gb} GB
-                  </span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

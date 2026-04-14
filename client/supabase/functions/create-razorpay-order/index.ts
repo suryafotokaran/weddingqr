@@ -6,13 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Plan configs: photos_limit + storage_gb for each named plan
-const PLAN_CONFIGS: Record<string, { photosLimit: number; storageGb: number }> = {
-  basic:   { photosLimit: 500,  storageGb: 5  },
-  pro:     { photosLimit: 1000, storageGb: 10 },
-  premium: { photosLimit: 2000, storageGb: 20 },
-};
-
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -39,8 +32,28 @@ serve(async (req: Request) => {
       });
     }
 
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+
+    // Reject if user already has a paid (non-free-trial) plan
+    const { data: existingPlan } = await supabaseAdmin
+      .from('user_plans')
+      .select('id, plan_key')
+      .eq('user_id', user.id)
+      .neq('plan_key', 'free_trial')
+      .limit(1)
+      .single();
+
+    if (existingPlan) {
+      return new Response(JSON.stringify({ error: 'You already have an active yearly plan. Only one purchase is allowed.' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const body = await req.json();
-    const { plan, amountPaise, photosLimit: customPhotosLimit, customLabel, eventId } = body;
+    const { plan, amountPaise } = body;
 
     if (!plan || !amountPaise) {
       return new Response(JSON.stringify({ error: 'Missing required fields: plan, amountPaise' }), {
@@ -48,9 +61,19 @@ serve(async (req: Request) => {
       });
     }
 
-    const planConfig = PLAN_CONFIGS[plan];
-    const finalPhotosLimit = customPhotosLimit ?? planConfig?.photosLimit ?? 500;
-    const finalStorageGb   = planConfig?.storageGb ?? Math.ceil(finalPhotosLimit * 0.01);
+    // Fetch plan config from DB (source of truth)
+    const { data: planConfig, error: planErr } = await supabaseAdmin
+      .from('yearly_plan_configs')
+      .select('*')
+      .eq('key', plan)
+      .eq('is_active', true)
+      .single();
+
+    if (planErr || !planConfig) {
+      return new Response(JSON.stringify({ error: 'Invalid or inactive plan' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const keyId     = Deno.env.get('RAZORPAY_KEY_ID')!;
     const keySecret = Deno.env.get('RAZORPAY_KEY_SECRET')!;
@@ -62,15 +85,10 @@ serve(async (req: Request) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: amountPaise,
+        amount:   amountPaise,
         currency: 'INR',
-        receipt: `wqr_${user.id.slice(0, 8)}_${Date.now()}`,
-        notes: {
-          plan,
-          user_id: user.id,
-          ...(eventId ? { event_id: eventId } : {}),
-          ...(customLabel ? { custom_label: customLabel } : {}),
-        },
+        receipt:  `wqr_${user.id.slice(0, 8)}_${Date.now()}`,
+        notes: { plan, user_id: user.id },
       }),
     });
 
@@ -84,30 +102,26 @@ serve(async (req: Request) => {
 
     const order = await razorpayRes.json();
 
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
-
-    await supabaseAdmin.from('purchases').insert({
-      user_id:           user.id,
-      plan,
-      quantity:          1,
-      events_granted:    9999,
-      photos_limit:      finalPhotosLimit,
-      storage_gb:        finalStorageGb,
-      amount_paise:      amountPaise,
-      razorpay_order_id: order.id,
-      status:            'pending',
-      ...(customLabel ? { custom_label: customLabel } : {}),
+    // Insert pending user_plan record
+    await supabaseAdmin.from('user_plans').insert({
+      user_id:            user.id,
+      plan_key:           plan,
+      photos_limit:       planConfig.photos_limit,
+      max_image_size_mb:  planConfig.max_image_size_mb,
+      duration_days:      planConfig.duration_days,
+      amount_paise:       amountPaise,
+      razorpay_order_id:  order.id,
+      status:             'pending',
+      start_date:         new Date().toISOString(),
+      end_date:           new Date(Date.now() + planConfig.duration_days * 86400000).toISOString(),
     });
 
     return new Response(JSON.stringify({
-      orderId:     order.id,
-      amount:      order.amount,
-      currency:    order.currency,
-      photosLimit: finalPhotosLimit,
-      storageGb:   finalStorageGb,
+      orderId:      order.id,
+      amount:       order.amount,
+      currency:     order.currency,
+      photosLimit:  planConfig.photos_limit,
+      durationDays: planConfig.duration_days,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
