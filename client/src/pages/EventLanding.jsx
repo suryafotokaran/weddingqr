@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, ArrowUp
+  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, ArrowUp, Globe
 } from 'lucide-react';
 import { deleteFromR2 } from '../lib/s3';
 import ConfirmModal from '../components/ConfirmModal';
@@ -50,7 +50,25 @@ export default function EventLanding() {
         .select('storage_path')
         .eq('event_id', id);
       setPhotoCount((ph ?? []).length);
-      setStoragePaths((ph ?? []).map(p => p.storage_path).filter(Boolean));
+      
+      // Collect storage paths from photos table
+      const photoPaths = (ph ?? []).map(p => p.storage_path).filter(Boolean);
+      
+      // Collect storage paths from invitation_config
+      const invPaths = [];
+      const cfg = ev.invitation_config;
+      if (cfg) {
+        ['groomPhoto', 'bridePhoto', 'heroPhoto'].forEach(field => {
+          if (cfg[field]?.path) invPaths.push(cfg[field].path);
+        });
+        if (Array.isArray(cfg.galleries)) {
+          cfg.galleries.forEach(g => {
+            if (g.path) invPaths.push(g.path);
+          });
+        }
+      }
+
+      setStoragePaths([...photoPaths, ...invPaths]);
 
       setLoading(false);
     };
@@ -208,7 +226,7 @@ export default function EventLanding() {
           <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-400">Choose what you'd like to do</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Photo Selection Card */}
           <button
             onClick={() => navigate(`/events/${id}/photos`)}
@@ -272,6 +290,40 @@ export default function EventLanding() {
 
               <div className="flex items-center gap-1.5 text-violet-600 font-bold text-sm group-hover:gap-2.5 transition-all duration-200">
                 Open QR Upload <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
+              </div>
+            </div>
+          </button>
+
+          {/* Web Invitation Card */}
+          <button
+            onClick={() => navigate(`/events/${id}/invitation`)}
+            onMouseEnter={() => setHoveredCard('invitation')}
+            onMouseLeave={() => setHoveredCard(null)}
+            className="group relative text-left bg-white rounded-2xl border-2 border-zinc-100 shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 hover:border-amber-300 hover:shadow-[0_20px_60px_rgba(245,166,35,0.15)] transition-all duration-300 active:scale-[0.98] overflow-hidden"
+          >
+            {/* Decorative BG gradient */}
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-br from-amber-50/60 via-transparent to-transparent" />
+
+            <div className="relative">
+              {/* Icon */}
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center mb-5 shadow-lg shadow-amber-500/25 group-hover:scale-105 transition-transform duration-300">
+                <Globe size={26} className="text-white" />
+              </div>
+
+              {/* Published badge */}
+              {event.invitation_config && (
+                <span className="absolute top-0 right-0 flex items-center gap-1 bg-amber-100 text-amber-700 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block" /> Published
+                </span>
+              )}
+
+              <h2 className="text-xl font-extrabold text-zinc-900 mb-2 tracking-tight">Web Invitation</h2>
+              <p className="text-sm text-zinc-500 leading-relaxed mb-6">
+                Create a beautiful digital wedding invitation. Pick a template, personalise, and share the link with guests.
+              </p>
+
+              <div className="flex items-center gap-1.5 text-amber-600 font-bold text-sm group-hover:gap-2.5 transition-all duration-200">
+                Open Invitation <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
               </div>
             </div>
           </button>
