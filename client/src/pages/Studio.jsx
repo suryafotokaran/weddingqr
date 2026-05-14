@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  Images, CalendarDays, Tag, ChevronRight, FolderOpen, Plus, Clock, HardDrive,
+  CalendarDays, Tag, ChevronRight, FolderOpen, Plus, HardDrive, Camera, ArrowUpRight,
 } from 'lucide-react';
 
 function getGreeting() {
@@ -16,9 +16,7 @@ function getGreeting() {
 
 function formatDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-IN', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  });
+  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function formatBytes(bytes) {
@@ -29,186 +27,164 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
+const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
 
 export default function Studio() {
   const navigate = useNavigate();
   const { data: userData } = useCurrentUser();
   const fullName = userData?.fullName ?? 'Photographer';
 
-  const [events,        setEvents]        = useState([]);
-  const [photoCount,    setPhotoCount]    = useState(0);
-  const [storageUsed,   setStorageUsed]   = useState(0);
-  const [loading,       setLoading]       = useState(true);
+  const [events,      setEvents]      = useState([]);
+  const [photoCount,  setPhotoCount]  = useState(0);
+  const [storageUsed, setStorageUsed] = useState(0);
+  const [loading,     setLoading]     = useState(true);
 
   useEffect(() => {
     const user = userData?.user;
     if (!user) return;
-
     (async () => {
       setLoading(true);
-
       const [evRes, countRes, sizeRes] = await Promise.all([
-        supabase.from('events').select('id, name, type, date, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('events').select('id,name,type,date,created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
         supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
         supabase.from('photos').select('size_bytes').eq('user_id', user.id),
       ]);
-
       setEvents(evRes.data ?? []);
       setPhotoCount(countRes.data ?? 0);
-      
-      const totalSize = (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
-      setStorageUsed(totalSize);
-      
+      setStorageUsed((sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0));
       setLoading(false);
     })();
   }, [userData]);
 
   const storagePercent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
+  const firstName = fullName.split(' ')[0];
 
   return (
     <DashboardLayout>
-      {/* Header */}
-      <header className="mb-10">
-        <p className="text-teal-700 font-bold tracking-[0.05em] text-[10px] uppercase mb-2">Workspace Overview</p>
-        <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900">
-          {getGreeting()}, {fullName.split(' ')[0]}.
-        </h1>
-      </header>
 
-      {/* Storage Banner */}
-      <section className="mb-6">
-        <div className="bg-white border border-zinc-100 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center gap-6">
-          <div className="w-14 h-14 rounded-2xl bg-teal-50 flex items-center justify-center shrink-0">
-            <HardDrive size={24} className="text-teal-600" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Total Storage Used</p>
-                <p className="font-bold text-lg text-zinc-900">{formatBytes(storageUsed)} <span className="text-zinc-400 font-medium text-sm">/ 10 GB</span></p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Photos</p>
-                <p className="font-bold text-teal-700">{photoCount.toLocaleString()}</p>
+      {/* ── Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+        <div>
+          <p className="text-teal-600 font-semibold tracking-widest text-[10px] uppercase mb-1.5">Workspace Overview</p>
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-900">
+            {getGreeting()}, {firstName}.
+          </h1>
+          <p className="text-sm text-zinc-400 mt-1 font-medium">
+            {loading ? 'Loading…' : `${events.length} event${events.length !== 1 ? 's' : ''} · ${photoCount.toLocaleString()} photos`}
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/createevent')}
+          className="group flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold shadow-md hover:bg-teal-800 active:scale-95 transition-all shrink-0"
+        >
+          <Plus size={15} />
+          Create New Event
+          <ArrowUpRight size={13} className="opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+        </button>
+      </div>
+
+      {/* ── 4-up Stat Strip ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {[
+          { label: 'Events Created',  value: loading ? '—' : events.length,               icon: CalendarDays },
+          { label: 'Photos Uploaded', value: loading ? '—' : photoCount.toLocaleString(), icon: Camera },
+          { label: 'Storage Used',    value: loading ? '—' : formatBytes(storageUsed),    icon: HardDrive },
+          { label: 'Capacity Used',   value: loading ? '—' : `${storagePercent.toFixed(1)}%`, icon: HardDrive },
+        ].map(({ label, value, icon: Icon }) => (
+          <div key={label} className="bg-white rounded-2xl border border-zinc-100 px-5 py-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">{label}</p>
+              <div className="w-7 h-7 rounded-lg bg-teal-50 flex items-center justify-center">
+                <Icon size={14} className="text-teal-600" />
               </div>
             </div>
-            {/* Storage progress */}
-            <div className="h-2 bg-zinc-100 rounded-full overflow-hidden w-full">
-              <div
-                className={`h-full transition-all duration-500 rounded-full ${storagePercent > 90 ? 'bg-red-500' : 'bg-teal-600'}`}
-                style={{ width: `${storagePercent}%` }}
-              />
-            </div>
+            <p className="text-2xl font-bold text-zinc-900 tracking-tight leading-none">{value}</p>
           </div>
-          <button
-            onClick={() => navigate('/createevent')}
-            className="shrink-0 flex items-center gap-2 px-6 py-3 rounded-xl bg-teal-700 text-white text-sm font-bold hover:bg-teal-800 transition-all active:scale-95 shadow-md"
-          >
-            <Plus size={16} /> Create New Event
-          </button>
-        </div>
-      </section>
+        ))}
+      </div>
 
-      {/* Stat Cards */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-        {/* Events Created */}
-        <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300 border border-zinc-50">
-          <div>
-            <CalendarDays size={24} className="text-teal-700 mb-4" />
-            <h4 className="text-sm font-medium text-zinc-500 uppercase tracking-wider">Events Created</h4>
-            <p className="text-4xl font-extrabold mt-2 text-zinc-900">
-              {loading ? '—' : events.length}
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/events')}
-            className="mt-6 flex items-center gap-1.5 text-xs font-bold text-teal-700 bg-teal-50 w-fit px-3 py-1.5 rounded-lg hover:bg-teal-100 transition-colors"
-          >
-            View all events <ChevronRight size={12} />
-          </button>
+      {/* ── Storage Bar ── */}
+      <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm px-5 py-4 mb-6 flex items-center gap-4">
+        <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
+          <HardDrive size={16} className="text-teal-600" />
         </div>
-
-        {/* Global Storage */}
-        <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300 border border-zinc-50">
-          <div>
-            <HardDrive size={24} className="text-teal-700 mb-4" />
-            <h4 className="text-sm font-medium text-zinc-500 uppercase tracking-wider">Cloud Storage Usage</h4>
-            <p className="text-4xl font-extrabold mt-2 text-zinc-900">
-              {loading ? '—' : formatBytes(storageUsed)}
-            </p>
-            <p className="text-sm text-zinc-400 mt-1">
-              of 10 GB global limit
-            </p>
+        <div className="flex-1">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-sm font-medium text-zinc-600">{formatBytes(storageUsed)} <span className="text-zinc-400">/ 10 GB</span></p>
+            <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${storagePercent > 90 ? 'bg-red-50 text-red-600' : 'bg-teal-50 text-teal-700'}`}>
+              {storagePercent.toFixed(1)}%
+            </span>
           </div>
-          <div className="mt-6 flex items-center gap-2 text-xs font-bold text-teal-700 bg-teal-50 w-fit px-3 py-1.5 rounded-lg">
-            <HardDrive size={12} />
-            ACROSS ALL EVENTS
+          <div className="h-2 bg-zinc-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${storagePercent > 90 ? 'bg-red-500' : 'bg-teal-600'}`}
+              style={{ width: `${Math.max(storagePercent, 0.4)}%` }}
+            />
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* Recent Events */}
-      <section className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 mb-10 border border-zinc-50">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold tracking-tight text-zinc-900">Recent Events</h3>
+      {/* ── Recent Events ── */}
+      <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden mb-6">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-50">
+          <h2 className="text-sm font-semibold text-zinc-900">Recent Events</h2>
           <button
             onClick={() => navigate('/events')}
-            className="text-xs font-bold text-teal-700 tracking-widest uppercase hover:underline"
+            className="flex items-center gap-1 text-[10px] font-semibold text-teal-700 tracking-widest uppercase hover:text-teal-800 transition"
           >
-            View All
+            View All <ChevronRight size={11} />
           </button>
         </div>
 
         {loading ? (
-          <div className="space-y-4">
+          <div className="p-5 space-y-3">
             {[1, 2, 3].map(i => (
-              <div key={i} className="h-16 bg-zinc-100 rounded-xl animate-pulse" />
+              <div key={i} className="h-14 bg-zinc-50 rounded-xl animate-pulse" />
             ))}
           </div>
         ) : events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-zinc-400">
-            <FolderOpen size={40} className="mb-3 opacity-25" />
-            <p className="font-semibold text-zinc-500 mb-1">No events yet</p>
-            <p className="text-sm mb-5">Create your first event to get started.</p>
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-zinc-50 flex items-center justify-center mb-4">
+              <FolderOpen size={24} className="text-zinc-300" />
+            </div>
+            <p className="font-semibold text-zinc-700 mb-1 text-sm">No events yet</p>
+            <p className="text-sm text-zinc-400 mb-5 max-w-xs">Create your first event to start collecting photos.</p>
             <button
               onClick={() => navigate('/createevent')}
-              className="bg-teal-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg hover:bg-teal-800 active:scale-95 transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold shadow-md hover:bg-teal-800 active:scale-95 transition-all"
             >
-              Create Event
+              <Plus size={14} /> Create Event
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
-            {events.slice(0, 6).map(event => (
+          <div>
+            {events.slice(0, 6).map((event, idx) => (
               <div
                 key={event.id}
                 onClick={() => navigate(`/events/${event.id}`)}
-                className="flex items-center gap-4 p-4 rounded-xl hover:bg-zinc-50 cursor-pointer group transition-colors"
+                className={`flex items-center gap-3 px-5 py-3.5 cursor-pointer group hover:bg-teal-50/50 transition-colors ${idx !== 0 ? 'border-t border-zinc-50' : ''}`}
               >
-                <div className="w-11 h-11 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
-                  <CalendarDays size={20} className="text-teal-600" />
+                <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center shrink-0 group-hover:bg-teal-100 transition-colors">
+                  <CalendarDays size={16} className="text-teal-600" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-zinc-900 truncate">{event.name}</p>
-                  <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-400">
-                    <span className="flex items-center gap-1"><Tag size={11} />{event.type}</span>
-                    <span className="flex items-center gap-1"><CalendarDays size={11} />{formatDate(event.date)}</span>
+                  <p className="font-medium text-zinc-900 truncate text-sm group-hover:text-teal-700 transition-colors">{event.name}</p>
+                  <div className="flex items-center gap-2.5 mt-0.5 text-[11px] text-zinc-400">
+                    <span className="flex items-center gap-1"><Tag size={10} />{event.type}</span>
+                    <span className="flex items-center gap-1"><CalendarDays size={10} />{formatDate(event.date)}</span>
                   </div>
                 </div>
-                <ChevronRight size={16} className="text-zinc-300 group-hover:text-teal-500 transition-colors shrink-0" />
+                <ChevronRight size={15} className="text-zinc-200 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all shrink-0" />
               </div>
             ))}
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Footer */}
-      <footer className="mt-4 py-8 border-t border-zinc-100 text-center">
-        <p className="text-xs text-zinc-400 font-medium">
-          © 2025 WeddingQR. All photography rights reserved.
-        </p>
+      <footer className="py-5 border-t border-zinc-100 text-center">
+        <p className="text-xs text-zinc-300 font-medium">© 2025 WeddingQR · All photography rights reserved.</p>
       </footer>
+
     </DashboardLayout>
   );
 }
