@@ -232,38 +232,37 @@ export default function QRUpload() {
 
   const removeStagedFile = (id) => setStagedFiles(prev => prev.filter(f => f.id !== id));
 
-  /* ── Upload stash with compression ── */
+  /* ── Upload with compression + face embedding ── */
   const startUpload = async () => {
     if (!stagedFiles.length || !user || !event) return;
 
-    // Storage validation (pre-check)
     const stagedTotalSize = stagedFiles.reduce((acc, f) => acc + f.file.size, 0);
     if (storageUsed + stagedTotalSize > GLOBAL_STORAGE_LIMIT) {
-       setQuotaModal({
-         show:        true,
-         currentUsed: storageUsed,
-         trying:      stagedTotalSize
-       });
-       return;
+      setQuotaModal({ show: true, currentUsed: storageUsed, trying: stagedTotalSize });
+      return;
     }
 
     cancelUploadRef.current = false;
     let cancelled = false;
-    const maxMb = 20; // Hardcoded global max
 
-    // ── Phase 1: Compress all images first ──────────────────────────────────
+    // Ensure models are ready BEFORE the upload loop starts
+    try {
+      await loadModels();
+    } catch (modelErr) {
+      console.warn('[Embed] Models failed — embeddings will be skipped:', modelErr);
+    }
+
+    // ── Phase 1: Compress ─────────────────────────────────────────────────────
     const compressedItems = [];
     for (let i = 0; i < stagedFiles.length; i++) {
       if (cancelUploadRef.current) { cancelled = true; break; }
       const item = stagedFiles[i];
-      const pct  = Math.round((i / stagedFiles.length) * 100);
-      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: pct, message: item.file.name });
+      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round((i / stagedFiles.length) * 100), message: item.file.name });
       try {
-        const compressed = await imageCompression(item.file, getCompressionOptions(maxMb));
+        const compressed = await imageCompression(item.file, getCompressionOptions(20));
         compressedItems.push({ ...item, compressed });
-      } catch (err) {
-        console.error('Compression failed for', item.file.name, err);
-        compressedItems.push({ ...item, compressed: item.file }); // fall back to original
+      } catch {
+        compressedItems.push({ ...item, compressed: item.file });
       }
       setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round(((i + 1) / stagedFiles.length) * 100), message: item.file.name });
     }
@@ -271,57 +270,49 @@ export default function QRUpload() {
     if (cancelled) {
       cancelUploadRef.current = false;
       setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-      setStagedFiles([]);
-      setSelectedFolderName(null);
+      setStagedFiles([]); setSelectedFolderName(null);
       return;
     }
 
-    // ── Phase 2: Upload all compressed images ───────────────────────────────
+    // ── Phase 2 & 3: Upload + Store Embeddings ────────────────────────────────
     const remainingStash = [...stagedFiles];
     let uploaded = 0;
 
     for (let i = 0; i < compressedItems.length; i++) {
       if (cancelUploadRef.current) { cancelled = true; break; }
       const item = compressedItems[i];
-      const pct  = Math.round((i / compressedItems.length) * 100);
-      setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: pct, message: item.file.name });
+      setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round((i / compressedItems.length) * 100), message: item.file.name });
 
-      // Double check storage limit before each file upload
       if (storageUsed + item.compressed.size > GLOBAL_STORAGE_LIMIT) {
-        showToast('error', 'Storage Full', 'Global storage limit of 10GB reached.');
-        break;
+        showToast('error', 'Storage Full', 'Global storage limit of 10GB reached.'); break;
       }
-
-      // Skip if a photo with the same name was already uploaded
-      const alreadyUploaded = photos.some(p => p.file_name === item.file.name);
-      if (alreadyUploaded) {
+      if (photos.some(p => p.file_name === item.file.name)) {
         const idx = remainingStash.findIndex(s => s.id === item.id);
         if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
         continue;
       }
 
       try {
+        // 1. Upload compressed image → Cloudflare R2
         const ext         = item.file.name.split('.').pop();
         const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const folderName  = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+        const folderName  = (event.name || event.id).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
         const storagePath = `${user.id}/${folderName}/qrupload/${fileName}`;
-
         await uploadToR2(item.compressed, storagePath);
-        const refUrl = buildR2RefUrl(storagePath);
 
+        // 2. Insert photo row → Supabase
         const { data: insertedPhoto, error: dbErr } = await supabase.from('photos').insert({
           event_id:     event.id,
           user_id:      user.id,
           storage_path: storagePath,
           file_name:    item.file.name,
           size_bytes:   item.compressed.size,
-          supabase_url: refUrl,
+          supabase_url: buildR2RefUrl(storagePath),
           source:       'qr_gallery',
         }).select('id').single();
-
         if (dbErr) throw new Error(dbErr.message);
 
-        // Face embeddings
+        // 3. Extract face vectors from ORIGINAL full-res file → store in face_embeddings
         try {
           const img        = await faceapi.bufferToImage(item.file);
           const detections = await extractMultipleEmbeddings(img);
@@ -330,13 +321,16 @@ export default function QRUpload() {
               photo_id:  insertedPhoto.id,
               embedding: `[${Array.from(det.descriptor).join(',')}]`,
             }));
-            await supabase.from('face_embeddings').insert(embeds);
+            const { error: embedErr } = await supabase.from('face_embeddings').insert(embeds);
+            if (embedErr) console.warn('[Embed] Insert failed:', embedErr.message);
+            else console.log(`[Embed] ✅ ${detections.length} face(s) stored for ${item.file.name}`);
+          } else {
+            console.log(`[Embed] No faces detected in ${item.file.name}`);
           }
         } catch (faceErr) {
-          console.error('Face processing failed for', item.file.name, faceErr);
+          console.warn('[Embed] Non-fatal face error:', faceErr.message);
         }
 
-        // Remove uploaded item from staged stash
         const idx = remainingStash.findIndex(s => s.id === item.id);
         if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
         uploaded++;
@@ -344,21 +338,16 @@ export default function QRUpload() {
 
       } catch (err) {
         console.error('Upload error:', err);
-        showToast('error', 'Upload failed', `Failed to upload ${item.file.name}: ${err.message}`);
+        showToast('error', 'Upload failed', `${item.file.name}: ${err.message}`);
       }
     }
 
     cancelUploadRef.current = false;
     setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-
-    if (cancelled) {
-      setStagedFiles([]);
-      setSelectedFolderName(null);
-    }
-
+    if (cancelled) { setStagedFiles([]); setSelectedFolderName(null); }
     if (uploaded > 0) {
       if (!cancelled) setSelectedFolderName(null);
-      showToast('success', cancelled ? 'Upload Paused' : 'Upload Complete', `${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded successfully.`);
+      showToast('success', cancelled ? 'Upload Paused' : 'Upload Complete', `${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded.`);
       await fetchData();
     }
   };
