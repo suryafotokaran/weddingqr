@@ -5,7 +5,7 @@ import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import {
-  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper,
+  CalendarDays, Tag, Type, Loader2, ChevronRight, PartyPopper, Images,
 } from 'lucide-react';
 
 const EVENT_CATEGORIES = [
@@ -18,8 +18,6 @@ export default function CreateEvent() {
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
 
-  const [activePlan, setActivePlan] = useState(null);
-  const [planLoading, setPlanLoading] = useState(true);
   const [form, setForm] = useState({ name: '', category: 'Wedding', date: '' });
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -29,43 +27,9 @@ export default function CreateEvent() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      setPlanLoading(true);
-
-      // Get active plan via RPC (also marks expired plans)
-      const { data: planRows } = await supabase.rpc('get_user_active_plan', { p_user_id: user.id });
-      const plan = planRows?.[0] ?? null;
-
-      if (!plan) {
-        // No active plan at all → go to pricing
-        navigate('/pricing', { replace: true });
-        return;
-      }
-
-      // Free trial: check if user already has an event
-      if (plan.plan_key === 'free_trial') {
-        const { count } = await supabase
-          .from('events')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id);
-
-        if (count >= 1) {
-          // Free trial exhausted → redirect to pricing with message
-          navigate('/pricing?upgrade=true', { replace: true });
-          return;
-        }
-      }
-
-      setActivePlan(plan);
-      setPlanLoading(false);
-    })();
-  }, [user, navigate]);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user || !activePlan) return;
+    if (!user) return;
     setSaving(true);
 
     const { data, error } = await supabase
@@ -75,7 +39,7 @@ export default function CreateEvent() {
         name:              form.name.trim(),
         type:              form.category,
         date:              form.date,
-        max_image_size_mb: activePlan.max_image_size_mb ?? 20,
+        max_image_size_mb: 20, // Global default
       })
       .select()
       .single();
@@ -89,54 +53,17 @@ export default function CreateEvent() {
     navigate(`/events/${data.id}`);
   };
 
-  if (planLoading) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-64">
-          <Loader2 className="animate-spin text-teal-600" size={32} />
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  if (!activePlan) return null;
-
-  const formatDate = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
-
   return (
     <DashboardLayout>
       <div className="max-w-2xl mx-auto py-10">
         {/* Header */}
         <div className="mb-10">
-          <div className="flex items-center gap-2 mb-4">
-            <span
-              className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
-              style={{ background: '#89f5e7', color: '#00685f' }}
-            >
-              <PartyPopper size={12} /> {activePlan.plan_key === 'free_trial' ? 'Free Trial' : `${activePlan.plan_key} Plan`}
-            </span>
-          </div>
           <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900 mb-2">
             Create Your Event
           </h1>
           <p className="text-zinc-500 font-medium">
             Name your event and set the date — then start uploading photos.
           </p>
-        </div>
-
-        {/* Plan Info */}
-        <div
-          className="flex items-center justify-between p-5 rounded-2xl mb-8 border"
-          style={{ background: '#f3f3f4', borderColor: '#e2e2e2' }}
-        >
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Active Plan</p>
-            <p className="font-bold text-zinc-900 capitalize">{activePlan.plan_key.replace(/_/g, ' ')}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Photo Limit</p>
-            <p className="font-bold text-teal-700">{activePlan.photos_limit.toLocaleString()} photos · Expires {formatDate(activePlan.end_date)}</p>
-          </div>
         </div>
 
         {/* Form */}
@@ -212,7 +139,7 @@ export default function CreateEvent() {
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-2 px-8 py-3.5 rounded-xl font-bold text-sm shadow-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed silk-gradient text-white hover:opacity-90"
+              className="flex items-center gap-2 px-8 py-3.5 rounded-xl font-bold text-sm shadow-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed bg-teal-700 text-white hover:opacity-90"
             >
               {saving
                 ? <><Loader2 size={16} className="animate-spin" /> Creating…</>

@@ -17,6 +17,13 @@ function SkeletonBlock({ className = '' }) {
   );
 }
 
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export default function EventLanding() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -26,11 +33,12 @@ export default function EventLanding() {
   const [loading, setLoading] = useState(true);
   const [photoCount, setPhotoCount] = useState(0);
   const [storagePaths, setStoragePaths] = useState([]);
-  const [activePlan, setActivePlan] = useState(null);
-  const [globalPhotoCount, setGlobalPhotoCount] = useState(0);
+  const [storageUsed, setStorageUsed] = useState(0);
   const [hoveredCard, setHoveredCard] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
+
+  const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
 
   const triggerConfirm = (title, message, action) => setConfirmModal({ isOpen: true, title, message, action });
   const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
@@ -47,7 +55,7 @@ export default function EventLanding() {
 
       const { data: ph } = await supabase
         .from('photos')
-        .select('storage_path')
+        .select('storage_path, size_bytes')
         .eq('event_id', id);
       setPhotoCount((ph ?? []).length);
       
@@ -56,7 +64,7 @@ export default function EventLanding() {
       
       // Collect storage paths from invitation_config
       const invPaths = [];
-      const cfg = ev.invitation_config;
+      const cfg = ev?.invitation_config;
       if (cfg) {
         ['groomPhoto', 'bridePhoto', 'heroPhoto'].forEach(field => {
           if (cfg[field]?.path) invPaths.push(cfg[field].path);
@@ -70,23 +78,17 @@ export default function EventLanding() {
 
       setStoragePaths([...photoPaths, ...invPaths]);
 
+      // Global storage for user
+      if (userData?.user) {
+        const { data: sizeRes } = await supabase.from('photos').select('size_bytes').eq('user_id', userData.user.id);
+        const totalSize = (sizeRes ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+        setStorageUsed(totalSize);
+      }
+
       setLoading(false);
     };
     fetchData();
-  }, [id]);
-
-  // Fetch global quota from user plan
-  useEffect(() => {
-    if (!userData?.user) return;
-    const uid = userData.user.id;
-    Promise.all([
-      supabase.rpc('get_user_active_plan', { p_user_id: uid }),
-      supabase.rpc('get_user_photo_count', { p_user_id: uid }),
-    ]).then(([planRes, countRes]) => {
-      setActivePlan(planRes.data?.[0] ?? null);
-      setGlobalPhotoCount(countRes.data ?? 0);
-    });
-  }, [userData]);
+  }, [id, userData]);
 
   if (loading) {
     return (
@@ -179,22 +181,21 @@ export default function EventLanding() {
 
             <div className="flex gap-3 items-stretch">
               {/* Global quota card with progress bar */}
-              {activePlan && (() => {
-                const limit   = activePlan.photos_limit;
-                const percent = Math.min(100, (globalPhotoCount / limit) * 100);
-                const isFull  = globalPhotoCount >= limit;
+              {(() => {
+                const percent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
+                const isFull  = storageUsed >= GLOBAL_STORAGE_LIMIT;
                 const isWarn  = percent >= 90 && !isFull;
                 return (
                   <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[190px]">
                     <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
                       <Images size={14} className={isFull ? 'text-red-500' : isWarn ? 'text-amber-500' : 'text-teal-600'} />
-                      <p className="text-[10px] font-bold uppercase tracking-widest">Total Photos Used</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest">Global Storage Used</p>
                     </div>
                     <div className="flex items-baseline gap-1">
                       <p className={`text-2xl font-black ${isFull ? 'text-red-600' : 'text-zinc-900'}`}>
-                        {globalPhotoCount.toLocaleString()}
+                        {formatBytes(storageUsed)}
                       </p>
-                      <p className="text-[11px] font-semibold text-zinc-400">/ {limit.toLocaleString()}</p>
+                      <p className="text-[11px] font-semibold text-zinc-400">/ 10 GB</p>
                     </div>
                     <div className="mt-2 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
                       <div
@@ -208,15 +209,6 @@ export default function EventLanding() {
                   </div>
                 );
               })()}
-
-              {/* Upgrade Plan — functionality TBD */}
-              <button
-                onClick={() => navigate('/pricing')}
-                className="flex flex-col items-center justify-center gap-1 px-5 rounded-xl text-xs font-bold border-2 border-teal-200 text-teal-700 bg-teal-50/40 hover:bg-teal-50 hover:border-teal-400 hover:shadow-md transition-all active:scale-95"
-              >
-                <ArrowUp size={14} className="mb-[-2px]" />
-                <span>Upgrade Plan</span>
-              </button>
             </div>
           </div>
         </div>

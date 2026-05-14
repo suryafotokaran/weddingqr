@@ -16,6 +16,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
+import { loadModels, extractMultipleEmbeddings } from '../lib/faceApi';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -104,8 +105,8 @@ export default function QRUpload() {
 
   const [event,        setEvent]        = useState(null);
   const [photos,       setPhotos]       = useState([]);
-  const [activePlan,   setActivePlan]   = useState(null);
   const [photoCount,   setPhotoCount]   = useState(0);
+  const [storageUsed,  setStorageUsed]  = useState(0);
   const [loading,      setLoading]      = useState(true);
   const [copied,       setCopied]       = useState(false);
   const [signedUrls,   setSignedUrls]   = useState({});
@@ -117,12 +118,14 @@ export default function QRUpload() {
   const [selectedIds,  setSelectedIds]  = useState(new Set());
   const [actionLoading,setActionLoading]= useState({ loading: false, message: '' });
   const [showGallery,  setShowGallery]  = useState(false);
-  const [quotaModal,   setQuotaModal]   = useState({ show: false, canUpload: 0, trying: 0, excess: 0 });
+  const [quotaModal,   setQuotaModal]   = useState({ show: false, currentUsed: 0, trying: 0 });
 
   const fileInputRef      = useRef(null);
   const folderInputRef    = useRef(null);
   const cancelUploadRef   = useRef(false);
   const [selectedFolderName, setSelectedFolderName] = useState(null);
+
+  const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
 
   const handleFolderPick = async () => {
     if ('showDirectoryPicker' in window) {
@@ -168,15 +171,13 @@ export default function QRUpload() {
 
   const getPhotoUrl = useCallback((photo) => signedUrls[photo.id] || photo.supabase_url || null, [signedUrls]);
 
-  /* ── Fetch event, photos, plan, models ── */
+  /* ── Fetch event, photos, storage, models ── */
   const fetchData = useCallback(async () => {
     if (!user) return;
 
     const [{ data: ev }] = await Promise.all([
       supabase.from('events').select('*').eq('id', id).single(),
-      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-      faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models'),
-      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+      loadModels(),
     ]);
 
     setEvent(ev);
@@ -189,14 +190,15 @@ export default function QRUpload() {
 
     setPhotos((allPh ?? []).filter(p => p.source === 'qr_gallery'));
 
-    // Fetch user's active plan + global photo count
-    const [planRes, countRes] = await Promise.all([
-      supabase.rpc('get_user_active_plan', { p_user_id: user.id }),
+    const [countRes, sizeRes] = await Promise.all([
       supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
+      supabase.from('photos').select('size_bytes').eq('user_id', user.id),
     ]);
 
-    setActivePlan(planRes.data?.[0] ?? null);
     setPhotoCount(countRes.data ?? 0);
+    const totalSize = (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+    setStorageUsed(totalSize);
+    
     setLoading(false);
   }, [id, user]);
 
@@ -234,23 +236,20 @@ export default function QRUpload() {
   const startUpload = async () => {
     if (!stagedFiles.length || !user || !event) return;
 
-    // Quota validation
-    if (planLimit !== null) {
-      const remaining = Math.max(0, planLimit - photoCount);
-      if (stagedFiles.length > remaining) {
-        setQuotaModal({
-          show:      true,
-          canUpload: remaining,
-          trying:    stagedFiles.length,
-          excess:    stagedFiles.length - remaining,
-        });
-        return;
-      }
+    // Storage validation (pre-check)
+    const stagedTotalSize = stagedFiles.reduce((acc, f) => acc + f.file.size, 0);
+    if (storageUsed + stagedTotalSize > GLOBAL_STORAGE_LIMIT) {
+       setQuotaModal({
+         show:        true,
+         currentUsed: storageUsed,
+         trying:      stagedTotalSize
+       });
+       return;
     }
 
     cancelUploadRef.current = false;
     let cancelled = false;
-    const maxMb = activePlan?.max_image_size_mb || 20;
+    const maxMb = 20; // Hardcoded global max
 
     // ── Phase 1: Compress all images first ──────────────────────────────────
     const compressedItems = [];
@@ -287,6 +286,12 @@ export default function QRUpload() {
       const pct  = Math.round((i / compressedItems.length) * 100);
       setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: pct, message: item.file.name });
 
+      // Double check storage limit before each file upload
+      if (storageUsed + item.compressed.size > GLOBAL_STORAGE_LIMIT) {
+        showToast('error', 'Storage Full', 'Global storage limit of 10GB reached.');
+        break;
+      }
+
       // Skip if a photo with the same name was already uploaded
       const alreadyUploaded = photos.some(p => p.file_name === item.file.name);
       if (alreadyUploaded) {
@@ -319,7 +324,7 @@ export default function QRUpload() {
         // Face embeddings
         try {
           const img        = await faceapi.bufferToImage(item.file);
-          const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true).withFaceDescriptors();
+          const detections = await extractMultipleEmbeddings(img);
           if (detections?.length > 0) {
             const embeds = detections.map(det => ({
               photo_id:  insertedPhoto.id,
@@ -364,10 +369,9 @@ export default function QRUpload() {
   const handleFilePick  = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
 
   // Quota info
-  const planLimit    = activePlan?.photos_limit ?? null;
-  const quotaPercent = planLimit ? Math.min(100, (photoCount / planLimit) * 100) : 0;
-  const quotaFull    = planLimit ? photoCount >= planLimit : false;
-  const quotaWarning = planLimit ? quotaPercent >= 90 && !quotaFull : false;
+  const storagePercent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
+  const quotaFull    = storageUsed >= GLOBAL_STORAGE_LIMIT;
+  const quotaWarning = storagePercent >= 90 && !quotaFull;
 
   /* ── Event Settings ── */
   const updateEventSetting = async (key, value, successTitle, successMsg) => {
@@ -496,7 +500,7 @@ export default function QRUpload() {
               </div>
             </div>
 
-            {/* Photo count + plan quota */}
+            {/* Photo count + storage quota */}
             <div className="flex gap-4 items-stretch">
               <div className="flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-2xl px-6 py-4">
                 <Images size={20} className="text-violet-500" />
@@ -506,26 +510,24 @@ export default function QRUpload() {
                 </div>
               </div>
 
-              {/* Global quota badge */}
-              {activePlan && (
-                <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
-                  <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
-                    <Images size={14} className="text-violet-600" />
-                    <p className="text-[10px] font-bold uppercase tracking-widest">Plan Quota</p>
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <p className="text-lg font-bold text-zinc-900">{photoCount.toLocaleString()}</p>
-                    <p className="text-[11px] font-semibold text-zinc-400">/ {planLimit?.toLocaleString()}</p>
-                  </div>
-                  <p className="text-[10px] text-zinc-400 leading-tight">across all events</p>
-                  <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-violet-500'}`}
-                      style={{ width: `${quotaPercent}%` }}
-                    />
-                  </div>
+              {/* Global storage badge */}
+              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-2.5 min-w-[160px] shadow-sm flex flex-col justify-center">
+                <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
+                  <CloudUpload size={14} className="text-violet-600" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Global Storage</p>
                 </div>
-              )}
+                <div className="flex items-baseline gap-1">
+                  <p className="text-lg font-bold text-zinc-900">{formatBytes(storageUsed)}</p>
+                  <p className="text-[11px] font-semibold text-zinc-400">/ 10 GB</p>
+                </div>
+                <p className="text-[10px] text-zinc-400 leading-tight">across all events</p>
+                <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${quotaFull ? 'bg-red-500' : quotaWarning ? 'bg-amber-400' : 'bg-violet-500'}`}
+                    style={{ width: `${storagePercent}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -534,16 +536,16 @@ export default function QRUpload() {
         {quotaFull && (
           <div className="flex items-center justify-between gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
             <div>
-              <p className="text-sm font-bold text-red-700">📛 Photo limit reached</p>
+              <p className="text-sm font-bold text-red-700">📛 Global storage limit reached</p>
               <p className="text-xs text-red-500 mt-0.5">
-                You've used all {planLimit?.toLocaleString()} photos in your plan. Contact support to discuss options.
+                You've used all 10 GB of storage. Delete some photos to upload more.
               </p>
             </div>
           </div>
         )}
         {quotaWarning && !quotaFull && (
           <div className="flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
-            <p className="text-sm font-bold text-amber-700">⚠️ Approaching photo limit — {photoCount.toLocaleString()} of {planLimit?.toLocaleString()} used</p>
+            <p className="text-sm font-bold text-amber-700">⚠️ Approaching global storage limit — {formatBytes(storageUsed)} of 10 GB used</p>
           </div>
         )}
 
@@ -743,7 +745,7 @@ export default function QRUpload() {
             </div>
             <div>
               <p className="text-base font-bold text-zinc-800">
-                {quotaFull ? 'Photo limit reached' : uploadState.phase !== 'idle' ? (uploadState.phase === 'compressing' ? 'Compressing photos…' : 'Uploading photos…') : isDragging ? 'Drop photos here' : 'Select photos to upload'}
+                {quotaFull ? 'Global storage full' : uploadState.phase !== 'idle' ? (uploadState.phase === 'compressing' ? 'Compressing photos…' : 'Uploading photos…') : isDragging ? 'Drop photos here' : 'Select photos to upload'}
               </p>
               <p className="text-sm text-zinc-500 mt-1">Images are automatically compressed before upload</p>
             </div>
@@ -859,10 +861,10 @@ export default function QRUpload() {
                 <h3 className="font-bold text-zinc-900 flex items-center gap-2">
                   <span className="w-6 h-6 rounded bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-black">{stagedFiles.length}</span>
                   Photos Ready to Upload
-                  {planLimit !== null && (stagedFiles.length + photoCount > planLimit) && (
+                  {quotaFull && (
                     <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-black animate-in fade-in duration-200">
                       <X size={10} strokeWidth={3} />
-                      {stagedFiles.length + photoCount - planLimit} to remove
+                      Storage Full
                     </span>
                   )}
                 </h3>
@@ -971,7 +973,7 @@ export default function QRUpload() {
         </div>
       </div>
 
-      {/* Quota Exceeded Modal */}
+      {/* Storage Full Modal */}
       {quotaModal.show && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setQuotaModal(m => ({ ...m, show: false }))} />
@@ -979,21 +981,18 @@ export default function QRUpload() {
             <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center mx-auto mb-5">
               <AlertCircle size={24} className="text-amber-500" />
             </div>
-            <h2 className="text-lg font-black text-zinc-900 text-center mb-3">Photo Limit Exceeded</h2>
+            <h2 className="text-lg font-black text-zinc-900 text-center mb-3">Global Storage Full</h2>
             <p className="text-sm text-zinc-500 text-center mb-1">
-              You can upload only{' '}
-              <span className="font-bold text-violet-600">{quotaModal.canUpload}</span>{' '}
-              more photo{quotaModal.canUpload !== 1 ? 's' : ''} in your plan.
+              Your global storage limit of 10 GB has been reached.
             </p>
             <p className="text-sm text-zinc-500 text-center mb-6">
-              You have selected <span className="font-bold text-zinc-800">{quotaModal.trying}</span> photos. Please remove{' '}
-              <span className="font-bold text-red-600">{quotaModal.excess}</span> photo{quotaModal.excess !== 1 ? 's' : ''} from the staging area and try again.
+              You are trying to upload <span className="font-bold text-zinc-800">{formatBytes(quotaModal.trying)}</span>, but only <span className="font-bold text-teal-600">{formatBytes(Math.max(0, GLOBAL_STORAGE_LIMIT - quotaModal.currentUsed))}</span> is remaining.
             </p>
             <button
               onClick={() => setQuotaModal(m => ({ ...m, show: false }))}
               className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm transition-all active:scale-95"
             >
-              OK, I'll remove some
+              OK, I'll check my photos
             </button>
           </div>
         </div>

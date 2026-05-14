@@ -76,11 +76,13 @@ export default function GuestUpload() {
   const [doneCount,    setDoneCount]    = useState(0);
   const [error,        setError]        = useState(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [quotaInfo,    setQuotaInfo]    = useState(null); // { used, limit }
+  const [storageUsed,  setStorageUsed]  = useState(0);
 
   const fileInputRef   = useRef(null);
   const folderInputRef = useRef(null);
   const [selectedFolderName, setSelectedFolderName] = useState(null);
+
+  const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
 
   const handleFolderPick = async () => {
     if ('showDirectoryPicker' in window) {
@@ -105,7 +107,7 @@ export default function GuestUpload() {
     }
   };
 
-  /* ── Fetch event, models & quota ── */
+  /* ── Fetch event, models & storage ── */
   useEffect(() => {
     let active = true;
     const init = async () => {
@@ -131,15 +133,10 @@ export default function GuestUpload() {
         } else {
           setEvent(ev);
 
-          // Fetch owner's plan quota info
-          const [planRes, countRes] = await Promise.all([
-            supabase.rpc('get_user_active_plan', { p_user_id: ev.user_id }),
-            supabase.rpc('get_user_photo_count', { p_user_id: ev.user_id }),
-          ]);
-          const plan = planRes.data?.[0];
-          if (plan) {
-            setQuotaInfo({ used: countRes.data ?? 0, limit: plan.photos_limit });
-          }
+          // Fetch owner's global storage usage
+          const { data: sizeRes } = await supabase.from('photos').select('size_bytes').eq('user_id', ev.user_id);
+          const totalSize = (sizeRes ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+          setStorageUsed(totalSize);
         }
 
         setModelsLoaded(true);
@@ -161,6 +158,13 @@ export default function GuestUpload() {
     const validFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
     if (!validFiles.length) return;
 
+    // Storage check (pre-upload)
+    const stagedTotalSize = validFiles.reduce((acc, f) => acc + f.size, 0);
+    if (storageUsed + stagedTotalSize > GLOBAL_STORAGE_LIMIT) {
+       setError('The host has reached their storage limit. Please contact them.');
+       return;
+    }
+
     const newItems = validFiles.map(f => ({
       id:         Math.random().toString(36).slice(2),
       name:       f.name,
@@ -181,6 +185,11 @@ export default function GuestUpload() {
         const maxMb = event.max_image_size_mb || 20;
         const compressed = await imageCompression(item.file, getCompressionOptions(maxMb));
 
+        // Final storage check
+        if (storageUsed + compressed.size > GLOBAL_STORAGE_LIMIT) {
+          throw new Error('Host storage limit reached.');
+        }
+
         // Step 2: Upload
         setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'uploading', progress: 20 } : u));
         const ext         = item.name.split('.').pop();
@@ -195,7 +204,7 @@ export default function GuestUpload() {
 
         const { data: insertedPhoto, error: dbErr } = await supabase.from('photos').insert({
           event_id:     event.id,
-          user_id:      null,
+          user_id:      event.user_id, // Tie to owner for storage tracking
           storage_path: storagePath,
           file_name:    item.name,
           size_bytes:   compressed.size,
@@ -224,7 +233,7 @@ export default function GuestUpload() {
 
         setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'done', progress: 100 } : u));
         setDoneCount(n => n + 1);
-        setQuotaInfo(prev => prev ? { ...prev, used: prev.used + 1 } : prev);
+        setStorageUsed(prev => prev + compressed.size);
 
       } catch (err) {
         setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'error', error: err.message } : u));
@@ -235,7 +244,7 @@ export default function GuestUpload() {
     setTimeout(() => {
       setUploading(prev => prev.filter(u => u.status !== 'done'));
     }, 5000);
-  }, [event, quotaInfo]);
+  }, [event, storageUsed]);
 
   const handleDrop      = useCallback((e) => { e.preventDefault(); setIsDragging(false); uploadFiles(e.dataTransfer.files); }, [uploadFiles]);
   const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };

@@ -4,9 +4,10 @@ import { supabase } from '../lib/supabase';
 import { getSignedPhotoUrls } from '../lib/s3';
 import {
   Images, CalendarDays, Tag, Loader2, Download, Check,
-  Square, CheckSquare, QrCode, EyeOff, X, Camera, User
+  Square, CheckSquare, QrCode, EyeOff, X, Camera, User, ShieldCheck
 } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
+import { loadModels, extractSingleEmbedding } from '../lib/faceApi';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -91,11 +92,7 @@ export default function QRView() {
         }
 
         // Event is valid and live, load models concurrently and silently
-        Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-          faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models'),
-          faceapi.nets.faceRecognitionNet.loadFromUri('/models')
-        ]).catch(err => console.error("FaceAPI models failed to load", err));
+        loadModels().catch(err => console.error("FaceAPI models failed to load", err));
 
         setEvent(data);
         setViewState('landing');
@@ -151,16 +148,14 @@ export default function QRView() {
     setViewState('processing');
 
     try {
-      const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks(true)
-        .withFaceDescriptor();
+      const descriptor = await extractSingleEmbedding(videoRef.current);
 
-      if (!detection) {
+      if (!descriptor) {
         setError('No face detected. Please make sure your face is visible and in good lighting.');
         return;
       }
 
-      const embeddingArray = Array.from(detection.descriptor);
+      const embeddingArray = Array.from(descriptor);
 
       const { data: matchedPhotos, error: rpcErr } = await supabase.rpc('match_faces', {
         query_embedding: `[${embeddingArray.join(',')}]`,
@@ -191,12 +186,14 @@ export default function QRView() {
 
       setPhotos(sortedPhotos);
       setViewState('gallery');
+      stopCamera();
 
     } catch (err) {
       console.error('Face processing error:', err);
       setError('Error processing photo or finding matches. Please try again.');
     }
   };
+
 
 
 
@@ -275,22 +272,37 @@ export default function QRView() {
 
   if (viewState === 'landing' && event) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6" style={{ background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #faf5ff 100%)' }}>
-        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-sm w-full text-center">
-          <div className="w-16 h-16 rounded-3xl bg-violet-100 flex items-center justify-center mx-auto mb-5 text-violet-600 shadow-inner">
-            <Tag size={28} />
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#fdfcff]">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] rounded-full bg-violet-100/50 blur-[120px]" />
+          <div className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] rounded-full bg-indigo-100/50 blur-[120px]" />
+        </div>
+
+        <div className="relative max-w-sm w-full text-center">
+          <div className="w-20 h-20 rounded-[2.5rem] bg-white shadow-2xl shadow-violet-200/50 flex items-center justify-center mx-auto mb-8 animate-in zoom-in duration-700">
+             <div className="w-14 h-14 rounded-3xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-violet-500/30">
+               <Tag size={24} />
+             </div>
           </div>
-          <h2 className="text-2xl font-black text-zinc-900 mb-1">{event.name}</h2>
-          <p className="text-sm font-medium text-zinc-500 mb-8">{new Date(event.date).toLocaleDateString()}</p>
-          
+
+          <div className="space-y-2 mb-10 animate-in slide-in-from-bottom-4 duration-700">
+            <h1 className="text-3xl font-black tracking-tight text-zinc-900 leading-tight">
+              {event.name}
+            </h1>
+            <p className="text-zinc-400 font-bold uppercase tracking-[0.2em] text-[10px]">
+              {new Date(event.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+            </p>
+          </div>
+
           <button
             onClick={() => setViewState('camera')}
-            className="w-full flex items-center justify-center gap-2 py-4 rounded-xl bg-violet-600 text-white text-base font-bold shadow-lg shadow-violet-500/25 hover:bg-violet-700 active:scale-[0.98] transition-all mb-4"
+            className="group relative w-full flex items-center justify-center gap-3 py-5 rounded-2xl bg-zinc-900 text-white text-lg font-bold shadow-2xl shadow-zinc-900/20 hover:scale-[1.02] active:scale-[0.98] transition-all overflow-hidden"
           >
-            <Camera size={20} /> Find My Photos
+            <div className="absolute inset-0 bg-gradient-to-r from-violet-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            <span className="relative z-10 flex items-center gap-2">
+              <Camera size={22} /> Find My Photos
+            </span>
           </button>
-
-
         </div>
       </div>
     );
@@ -323,60 +335,106 @@ export default function QRView() {
 
   if (viewState === 'initial' || viewState === 'processing') {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #faf5ff 100%)' }}>
-        <Loader2 className="animate-spin text-violet-500 mb-4" size={40} />
-        <h2 className="text-xl font-bold text-zinc-800">
-          {viewState === 'initial' ? 'Loading Gallery...' : 'Finding your magic moments...'}
-        </h2>
-        <p className="text-sm text-zinc-500 mt-2 text-center max-w-sm px-6">
-          {viewState === 'processing' && 'We are matching your face securely. Your photo never leaves your device.'}
-        </p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#fdfcff] p-6">
+        <div className="relative">
+           <div className="absolute inset-0 bg-violet-500 blur-2xl opacity-20 animate-pulse" />
+           <div className="relative bg-white rounded-3xl p-10 shadow-xl border border-zinc-50 flex flex-col items-center">
+             <Loader2 className="animate-spin text-violet-600 mb-6" size={48} strokeWidth={3} />
+             <h2 className="text-2xl font-black text-zinc-900 mb-2">
+               {viewState === 'initial' ? 'Waking up...' : 'Magic in progress...'}
+             </h2>
+             <p className="text-sm text-zinc-400 font-medium text-center max-w-[240px] leading-relaxed">
+               {viewState === 'initial' ? 'Preparing your personalized gallery.' : 'Matching your face with event photos securely.'}
+             </p>
+             
+             {viewState === 'processing' && (
+               <div className="mt-8 px-4 py-2 bg-green-50 rounded-full flex items-center gap-2">
+                 <ShieldCheck size={14} className="text-green-500" />
+                 <span className="text-[10px] font-bold text-green-700 uppercase tracking-wider">Processing On-Device</span>
+               </div>
+             )}
+           </div>
+        </div>
       </div>
     );
   }
 
   if (viewState === 'camera') {
     return (
-      <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 60%, #faf5ff 100%)' }}>
+      <div className="min-h-screen flex flex-col bg-[#fdfcff]">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-[10%] -right-[10%] w-[40%] h-[40%] rounded-full bg-violet-100/50 blur-[120px]" />
+        </div>
+
         <div className="flex-1 flex flex-col items-center justify-center p-6">
-          <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden text-center">
-            <div className="p-6">
-              <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto mb-4 text-violet-600">
+          <div className="max-w-md w-full animate-in fade-in slide-in-from-bottom-8 duration-700">
+            {/* Header Area */}
+            <div className="text-center mb-8">
+              <div className="w-12 h-12 rounded-2xl bg-violet-50 flex items-center justify-center mx-auto mb-4 text-violet-600">
                 <User size={24} />
               </div>
-              <h2 className="text-2xl font-black text-zinc-900 mb-2">Take a Selfie</h2>
-              <p className="text-sm text-zinc-500 mb-6 px-4">
-                Take a quick selfie to find all your photos from <b>{event?.name}</b>. Your selfie stays on your device and is never uploaded.
+              <h2 className="text-3xl font-black text-zinc-900 mb-2">Take a Selfie</h2>
+              <p className="text-sm text-zinc-500 max-w-[280px] mx-auto leading-relaxed">
+                We'll use this to find your photos from <b>{event?.name}</b>.
               </p>
+            </div>
+
+            {/* Camera Preview Area */}
+            <div className="relative aspect-[3/4] bg-zinc-900 rounded-[2.5rem] overflow-hidden shadow-2xl shadow-violet-200/50 border-[6px] border-white">
+              {!streamRef.current && (
+                <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
+                  <Loader2 className="animate-spin text-white/20" size={40} />
+                </div>
+              )}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover scale-x-[-1]"
+              />
               
-              <div className="relative w-full aspect-[3/4] bg-zinc-900 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center">
-                {!streamRef.current && (
-                  <Loader2 className="animate-spin text-white absolute" size={32} />
-                )}
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover scale-x-[-1]"
-                />
-                
-                {/* Face guide overlay */}
-                <div className="absolute inset-x-[15%] inset-y-[20%] border-2 border-dashed border-white/50 rounded-[4rem] pointer-events-none" />
+              {/* Modern Scan Guide */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                 <div className="w-64 h-80 border-2 border-dashed border-white/40 rounded-[3rem] relative">
+                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-violet-500 rounded-tl-2xl" />
+                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-violet-500 rounded-tr-2xl" />
+                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-violet-500 rounded-bl-2xl" />
+                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-violet-500 rounded-br-2xl" />
+                 </div>
               </div>
 
-              <div className="mt-8 space-y-3">
-                <button
-                  onClick={handleCapture}
-                  className="w-full flex items-center justify-center gap-2 py-4 rounded-xl bg-violet-600 text-white text-base font-bold shadow-lg shadow-violet-500/25 hover:bg-violet-700 active:scale-[0.98] transition-all"
-                >
-                  <Camera size={20} />
-                  Capture & Find
-                </button>
-
+              {/* Glass Privacy Badge */}
+              <div className="absolute top-6 left-6 right-6">
+                 <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-4 py-2.5 flex items-center gap-2.5">
+                    <div className="w-6 h-6 rounded-lg bg-green-500 flex items-center justify-center">
+                       <ShieldCheck size={14} className="text-white" />
+                    </div>
+                    <p className="text-[10px] font-bold text-white uppercase tracking-wider">Secure Matching On-Device</p>
+                 </div>
               </div>
             </div>
+
+            {/* Actions Area */}
+            <div className="mt-8">
+              <button
+                onClick={handleCapture}
+                className="group relative w-full flex items-center justify-center gap-3 py-5 rounded-2xl bg-violet-600 text-white text-lg font-bold shadow-2xl shadow-violet-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-violet-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <span className="relative z-10 flex items-center gap-2">
+                  <Camera size={22} /> Capture & Find
+                </span>
+              </button>
+            </div>
           </div>
+        </div>
+
+        {/* Footer Privacy Note */}
+        <div className="pb-10 px-6 text-center">
+          <p className="text-[11px] font-medium text-zinc-400 max-w-[240px] mx-auto leading-normal italic">
+            Your selfie is processed locally and is never uploaded or saved to our servers.
+          </p>
         </div>
       </div>
     );

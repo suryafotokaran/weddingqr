@@ -8,7 +8,6 @@ import OtpVerify from './pages/auth/OtpVerify';
 import ConfirmPassword from './pages/auth/ConfirmPassword';
 import Studio from './pages/Studio';
 import Profile from './pages/Profile';
-import Pricing from './pages/Pricing';
 import CreateEvent from './pages/CreateEvent';
 import EventDetail from './pages/EventDetail';
 import EventLanding from './pages/EventLanding';
@@ -17,7 +16,6 @@ import GuestEventView from './pages/GuestEventView';
 import QRUpload from './pages/QRUpload';
 import GuestUpload from './pages/GuestUpload';
 import QRView from './pages/QRView';
-import Payments from './pages/Payments';
 import WebInvitation from './pages/WebInvitation';
 import InvitationView from './pages/InvitationView';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -34,8 +32,6 @@ export default function App() {
 
       <Route path="/studio" element={<ProtectedRoute><Studio /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-      <Route path="/pricing" element={<ProtectedRoute><Pricing /></ProtectedRoute>} />
-      <Route path="/payments" element={<ProtectedRoute><Payments /></ProtectedRoute>} />
       <Route path="/events" element={<ProtectedRoute><Events /></ProtectedRoute>} />
       <Route path="/createevent" element={<ProtectedRoute><CreateEvent /></ProtectedRoute>} />
       <Route path="/events/:id" element={<ProtectedRoute><EventLanding /></ProtectedRoute>} />
@@ -48,7 +44,7 @@ export default function App() {
       <Route path="/qr/:id" element={<QRView />} />
 
       {/* Legacy redirect */}
-      <Route path="/events/new" element={<ProtectedRoute><Navigate to="/pricing" replace /></ProtectedRoute>} />
+      <Route path="/events/new" element={<ProtectedRoute><Navigate to="/createevent" replace /></ProtectedRoute>} />
     </Routes>
   );
 }

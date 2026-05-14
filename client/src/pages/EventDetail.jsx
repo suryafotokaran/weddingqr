@@ -148,14 +148,12 @@ export default function EventDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: userData } = useCurrentUser();
-  const user = userData?.user;
-
-  const [event, setEvent]           = useState(null);
+  const user = userData?.user;  const [event, setEvent]           = useState(null);
   const [photos, setPhotos]         = useState([]);
   const [allPhotos, setAllPhotos]   = useState([]);
   const [stagedFiles, setStagedFiles] = useState([]);
   const [uploadState, setUploadState] = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-  const [quotaModal,  setQuotaModal]  = useState({ show: false, canUpload: 0, trying: 0, excess: 0 });
+  const [quotaModal,  setQuotaModal]  = useState({ show: false, currentUsed: 0, trying: 0 });
   const [loading, setLoading]       = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast]           = useState(null);
@@ -172,8 +170,10 @@ export default function EventDetail() {
   const [activeTab, setActiveTab] = useState('all');
   const [showGallery, setShowGallery] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
-  const [activePlan, setActivePlan] = useState(null);
   const [photoCount, setPhotoCount] = useState(0);
+  const [storageUsed, setStorageUsed] = useState(0);
+
+  const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
 
   const triggerConfirm = (title, message, action) => {
     setConfirmModal({ isOpen: true, title, message, action });
@@ -208,6 +208,7 @@ export default function EventDetail() {
   };
 
   const fetchEvent = useCallback(async (isInitial = false) => {
+    if (!user) return;
     if (isInitial) setLoading(true);
     const { data: ev } = await supabase
       .from('events')
@@ -226,8 +227,18 @@ export default function EventDetail() {
     setAllPhotos(allPhArr);
     // Gallery only shows host-uploaded photos (source='host')
     setPhotos(allPhArr.filter(p => p.source === 'host' || (!p.source && p.user_id)));
+
+    // Fetch global usage
+    const [countRes, sizeRes] = await Promise.all([
+      supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
+      supabase.from('photos').select('size_bytes').eq('user_id', user.id),
+    ]);
+    setPhotoCount(countRes.data ?? 0);
+    const totalSize = (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+    setStorageUsed(totalSize);
+
     if (isInitial) setLoading(false);
-  }, [id]);
+  }, [id, user]);
 
   useEffect(() => { 
     if (event) setTempPassword(event.password || '');
@@ -268,6 +279,14 @@ export default function EventDetail() {
     if (!file || !replacingPhotoId || !user || !event) return;
     const photo = photos.find(p => p.id === replacingPhotoId);
     if (!photo) return;
+
+    // Storage check for replacement
+    const sizeDiff = file.size - (photo.size_bytes || 0);
+    if (storageUsed + sizeDiff > GLOBAL_STORAGE_LIMIT) {
+      showToast('error', 'Storage Full', 'Global storage limit reached.');
+      return;
+    }
+
     setReplacingPhotoId(null);
     setActionLoading({ loading: true, message: 'Replacing photo…' });
     try {
@@ -320,18 +339,6 @@ export default function EventDetail() {
     await fetchPhotoComments();
   };
 
-  // Fetch user's active plan + global photo count whenever event loads
-  useEffect(() => {
-    if (!user || !event) return;
-    Promise.all([
-      supabase.rpc('get_user_active_plan', { p_user_id: user.id }),
-      supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
-    ]).then(([planRes, countRes]) => {
-      setActivePlan(planRes.data?.[0] ?? null);
-      setPhotoCount(countRes.data ?? 0);
-    });
-  }, [user, event]);
-
   // ── Stage files (local preview) ───────────────────────────────────────────
   const stageFiles = useCallback((files) => {
     if (!user || !event) return;
@@ -364,13 +371,15 @@ export default function EventDetail() {
   const startUpload = async () => {
     if (!stagedFiles.length || !user || !event) return;
 
-    // Quota validation — show modal instead of toast
-    if (planLimit !== null) {
-      const remaining = Math.max(0, planLimit - photoCount);
-      if (stagedFiles.length > remaining) {
-        setQuotaModal({ show: true, canUpload: remaining, trying: stagedFiles.length, excess: stagedFiles.length - remaining });
-        return;
-      }
+    // Storage check
+    const stagedTotalSize = stagedFiles.reduce((acc, f) => acc + f.file.size, 0);
+    if (storageUsed + stagedTotalSize > GLOBAL_STORAGE_LIMIT) {
+       setQuotaModal({
+         show:        true,
+         currentUsed: storageUsed,
+         trying:      stagedTotalSize
+       });
+       return;
     }
 
     cancelUploadRef.current = false;
@@ -408,6 +417,12 @@ export default function EventDetail() {
       if (cancelUploadRef.current) { cancelled = true; break; }
       const item = compressedItems[i];
       setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round((i / compressedItems.length) * 100), message: item.file.name });
+
+      // Double check storage limit before each file upload
+      if (storageUsed + item.compressed.size > GLOBAL_STORAGE_LIMIT) {
+        showToast('error', 'Storage Full', 'Global storage limit reached.');
+        break;
+      }
 
       // Skip if already uploaded (safety check)
       if (photos.some(p => p.file_name === item.file.name)) {
@@ -525,10 +540,10 @@ export default function EventDetail() {
   };
 
   // Photo quota
-  const planLimit    = activePlan?.photos_limit ?? null;
-  const quotaFull    = planLimit ? photoCount >= planLimit : false;
-  const quotaPercent = planLimit ? Math.min(100, (photoCount / planLimit) * 100) : 0;
-  const quotaWarning = planLimit ? quotaPercent >= 90 && !quotaFull : false;
+  const storagePercent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
+  const quotaFull    = storageUsed >= GLOBAL_STORAGE_LIMIT;
+  const quotaWarning = storagePercent >= 90 && !quotaFull;
+
   const handleSavePassword = async () => {
     if (!event) return;
     setActionLoading({ loading: true, message: 'Saving Password...' });
@@ -816,19 +831,17 @@ export default function EventDetail() {
                 <p className="text-[10px] text-zinc-400 mt-0.5">in this event</p>
               </div>
 
-              {activePlan && (
-                <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[140px]">
-                  <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
-                    <Images size={14} className={quotaFull ? 'text-red-500' : quotaWarning ? 'text-amber-500' : 'text-violet-500'} />
-                    <p className="text-[10px] font-bold uppercase tracking-widest">Total Used</p>
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <p className={`text-2xl font-black ${quotaFull ? 'text-red-600' : 'text-zinc-900'}`}>{photoCount.toLocaleString()}</p>
-                    <p className="text-[11px] font-semibold text-zinc-400">/ {planLimit?.toLocaleString()}</p>
-                  </div>
-                  <p className="text-[10px] text-zinc-400 mt-0.5">across all events</p>
+              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[140px]">
+                <div className="flex items-center gap-1.5 mb-1 text-zinc-400">
+                  <Images size={14} className={quotaFull ? 'text-red-500' : quotaWarning ? 'text-amber-500' : 'text-violet-500'} />
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Global Storage</p>
                 </div>
-              )}
+                <div className="flex items-baseline gap-1">
+                  <p className={`text-2xl font-black ${quotaFull ? 'text-red-600' : 'text-zinc-900'}`}>{formatBytes(storageUsed)}</p>
+                  <p className="text-[11px] font-semibold text-zinc-400">/ 10 GB</p>
+                </div>
+                <p className="text-[10px] text-zinc-400 mt-0.5">across all events</p>
+              </div>
             </div>
           </div>
         </div>
@@ -836,12 +849,12 @@ export default function EventDetail() {
         {/* Photo quota banners */}
         {quotaFull && (
           <div className="flex items-center gap-4 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 mb-6">
-            <p className="text-sm font-bold text-red-700">📛 Photo limit reached — {photoCount.toLocaleString()} / {planLimit?.toLocaleString()} used. Contact support for options.</p>
+            <p className="text-sm font-bold text-red-700">📛 Global storage limit reached — {formatBytes(storageUsed)} / 10 GB used. Please delete some photos to upload more.</p>
           </div>
         )}
         {quotaWarning && !quotaFull && (
           <div className="flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 mb-6">
-            <p className="text-sm font-bold text-amber-700">⚠️ Approaching photo limit — {photoCount.toLocaleString()} of {planLimit?.toLocaleString()} used</p>
+            <p className="text-sm font-bold text-amber-700">⚠️ Approaching storage limit — {formatBytes(storageUsed)} of 10 GB used</p>
           </div>
         )}
 
@@ -1112,10 +1125,10 @@ export default function EventDetail() {
                 <h3 className="font-bold text-zinc-900 flex items-center gap-2">
                   <span className="w-6 h-6 rounded bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-black">{stagedFiles.length}</span>
                   Photos Ready to Upload
-                  {planLimit !== null && (stagedFiles.length + photoCount > planLimit) && (
+                  {storageUsed + stagedFiles.reduce((acc, f) => acc + f.file.size, 0) > GLOBAL_STORAGE_LIMIT && (
                     <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-black animate-in fade-in duration-200">
                       <X size={10} strokeWidth={3} />
-                      {stagedFiles.length + photoCount - planLimit} to remove
+                      Over Limit
                     </span>
                   )}
                 </h3>
@@ -1505,13 +1518,12 @@ export default function EventDetail() {
             <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center mx-auto mb-5">
               <AlertCircle size={24} className="text-amber-500" />
             </div>
-            <h2 className="text-lg font-black text-zinc-900 text-center mb-3">Photo Limit Exceeded</h2>
+            <h2 className="text-lg font-black text-zinc-900 text-center mb-3">Storage Limit Exceeded</h2>
             <p className="text-sm text-zinc-500 text-center mb-1">
-              You can upload only <span className="font-bold text-teal-600">{quotaModal.canUpload}</span> more photo{quotaModal.canUpload !== 1 ? 's' : ''} in your plan.
+              You are trying to upload <span className="font-bold text-teal-600">{formatBytes(quotaModal.trying)}</span> but you only have <span className="font-bold text-teal-600">{formatBytes(Math.max(0, GLOBAL_STORAGE_LIMIT - quotaModal.currentUsed))}</span> remaining.
             </p>
             <p className="text-sm text-zinc-500 text-center mb-6">
-              You selected <span className="font-bold text-zinc-800">{quotaModal.trying}</span> photos. Please remove{' '}
-              <span className="font-bold text-red-600">{quotaModal.excess}</span> photo{quotaModal.excess !== 1 ? 's' : ''} from the staging area and try again.
+              Please remove some photos from the staging area and try again.
             </p>
             <button
               onClick={() => setQuotaModal(m => ({ ...m, show: false }))}

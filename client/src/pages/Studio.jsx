@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  Images, CalendarDays, Tag, ChevronRight, FolderOpen, Plus, Clock,
+  Images, CalendarDays, Tag, ChevronRight, FolderOpen, Plus, Clock, HardDrive,
 } from 'lucide-react';
 
 function getGreeting() {
@@ -21,21 +21,25 @@ function formatDate(d) {
   });
 }
 
-function getDaysLeft(endDate) {
-  if (!endDate) return null;
-  const ms = new Date(endDate) - new Date();
-  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
+
+const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
 
 export default function Studio() {
   const navigate = useNavigate();
   const { data: userData } = useCurrentUser();
   const fullName = userData?.fullName ?? 'Photographer';
 
-  const [events,      setEvents]      = useState([]);
-  const [photoCount,  setPhotoCount]  = useState(0);
-  const [activePlan,  setActivePlan]  = useState(null);
-  const [loading,     setLoading]     = useState(true);
+  const [events,        setEvents]        = useState([]);
+  const [photoCount,    setPhotoCount]    = useState(0);
+  const [storageUsed,   setStorageUsed]   = useState(0);
+  const [loading,       setLoading]       = useState(true);
 
   useEffect(() => {
     const user = userData?.user;
@@ -44,90 +48,75 @@ export default function Studio() {
     (async () => {
       setLoading(true);
 
-      // Fetch active plan + photo count in parallel
-      const [planRes, evRes, countRes] = await Promise.all([
-        supabase.rpc('get_user_active_plan', { p_user_id: user.id }),
+      const [evRes, countRes, sizeRes] = await Promise.all([
         supabase.from('events').select('id, name, type, date, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
         supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
+        supabase.from('photos').select('size_bytes').eq('user_id', user.id),
       ]);
 
-      setActivePlan(planRes.data?.[0] ?? null);
       setEvents(evRes.data ?? []);
       setPhotoCount(countRes.data ?? 0);
+      
+      const totalSize = (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+      setStorageUsed(totalSize);
+      
       setLoading(false);
     })();
   }, [userData]);
 
-  const daysLeft = getDaysLeft(activePlan?.end_date);
-
-  const daysLeftBadge = () => {
-    if (daysLeft === null) return null;
-    let cls = 'bg-teal-500/40 text-teal-50';
-    if (daysLeft <= 5) cls = 'bg-red-500 text-white font-bold shadow-md ring-2 ring-red-400/50';
-    else if (daysLeft <= 10) cls = 'bg-amber-400 text-amber-900 font-bold shadow-sm';
-    return (
-      <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide ${cls}`}>
-        {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left
-      </span>
-    );
-  };
+  const storagePercent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
 
   return (
     <DashboardLayout>
       {/* Header */}
       <header className="mb-10">
-        <p className="text-amber-700 font-bold tracking-[0.05em] text-[10px] uppercase mb-2">Workspace Overview</p>
+        <p className="text-teal-700 font-bold tracking-[0.05em] text-[10px] uppercase mb-2">Workspace Overview</p>
         <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900">
           {getGreeting()}, {fullName.split(' ')[0]}.
         </h1>
       </header>
 
-      {/* Active Plan Banner */}
-      {activePlan && (
-        <section className="mb-6">
-          <div className="bg-gradient-to-r from-teal-600 to-teal-700 rounded-2xl p-6 text-white flex flex-col md:flex-row md:items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-              <Clock size={22} className="text-white" />
-            </div>
-            <div className="flex-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-teal-200 mb-0.5">
-                {activePlan.plan_key === 'free_trial' ? 'Free Trial · Active' : 'Yearly Plan · Active'}
-              </p>
-              <p className="font-bold text-lg capitalize">{activePlan.plan_key.replace(/_/g, ' ')}</p>
-              <div className="flex items-center gap-4 mt-1">
-                <span className="text-xs text-teal-100">
-                  {photoCount.toLocaleString()} / {activePlan.photos_limit.toLocaleString()} photos used
-                </span>
-                <span className="text-xs text-teal-200 flex items-center gap-2">
-                  Expires {formatDate(activePlan.end_date)}
-                  {daysLeftBadge()}
-                </span>
-              </div>
-              {/* Photo quota progress */}
-              <div className="mt-2 h-1.5 bg-white/20 rounded-full overflow-hidden w-full max-w-xs">
-                <div
-                  className="h-full bg-white rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, (photoCount / activePlan.photos_limit) * 100)}%` }}
-                />
-              </div>
-            </div>
-            <button
-              onClick={() => navigate('/createevent')}
-              className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-teal-700 text-sm font-bold hover:bg-teal-50 transition-all active:scale-95"
-            >
-              <Plus size={15} /> Create Event
-            </button>
+      {/* Storage Banner */}
+      <section className="mb-6">
+        <div className="bg-white border border-zinc-100 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center gap-6">
+          <div className="w-14 h-14 rounded-2xl bg-teal-50 flex items-center justify-center shrink-0">
+            <HardDrive size={24} className="text-teal-600" />
           </div>
-        </section>
-      )}
+          <div className="flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Total Storage Used</p>
+                <p className="font-bold text-lg text-zinc-900">{formatBytes(storageUsed)} <span className="text-zinc-400 font-medium text-sm">/ 10 GB</span></p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-0.5">Photos</p>
+                <p className="font-bold text-teal-700">{photoCount.toLocaleString()}</p>
+              </div>
+            </div>
+            {/* Storage progress */}
+            <div className="h-2 bg-zinc-100 rounded-full overflow-hidden w-full">
+              <div
+                className={`h-full transition-all duration-500 rounded-full ${storagePercent > 90 ? 'bg-red-500' : 'bg-teal-600'}`}
+                style={{ width: `${storagePercent}%` }}
+              />
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/createevent')}
+            className="shrink-0 flex items-center gap-2 px-6 py-3 rounded-xl bg-teal-700 text-white text-sm font-bold hover:bg-teal-800 transition-all active:scale-95 shadow-md"
+          >
+            <Plus size={16} /> Create New Event
+          </button>
+        </div>
+      </section>
 
       {/* Stat Cards */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
         {/* Events Created */}
-        <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300">
+        <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300 border border-zinc-50">
           <div>
             <CalendarDays size={24} className="text-teal-700 mb-4" />
-            <h4 className="text-sm font-medium text-zinc-500">Events Created</h4>
+            <h4 className="text-sm font-medium text-zinc-500 uppercase tracking-wider">Events Created</h4>
             <p className="text-4xl font-extrabold mt-2 text-zinc-900">
               {loading ? '—' : events.length}
             </p>
@@ -140,34 +129,32 @@ export default function Studio() {
           </button>
         </div>
 
-        {/* Total Photos */}
-        <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300">
+        {/* Global Storage */}
+        <div className="bg-white p-8 rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] flex flex-col justify-between group hover:-translate-y-1 transition-all duration-300 border border-zinc-50">
           <div>
-            <Images size={24} className="text-amber-700 mb-4" />
-            <h4 className="text-sm font-medium text-zinc-500">Total Photos Uploaded</h4>
+            <HardDrive size={24} className="text-teal-700 mb-4" />
+            <h4 className="text-sm font-medium text-zinc-500 uppercase tracking-wider">Cloud Storage Usage</h4>
             <p className="text-4xl font-extrabold mt-2 text-zinc-900">
-              {loading ? '—' : photoCount.toLocaleString()}
+              {loading ? '—' : formatBytes(storageUsed)}
             </p>
-            {activePlan && (
-              <p className="text-sm text-zinc-400 mt-1">
-                of {activePlan.photos_limit.toLocaleString()} photo limit
-              </p>
-            )}
+            <p className="text-sm text-zinc-400 mt-1">
+              of 10 GB global limit
+            </p>
           </div>
-          <div className="mt-6 flex items-center gap-2 text-xs font-bold text-amber-700 bg-orange-50 w-fit px-3 py-1.5 rounded-lg">
-            <Images size={12} />
+          <div className="mt-6 flex items-center gap-2 text-xs font-bold text-teal-700 bg-teal-50 w-fit px-3 py-1.5 rounded-lg">
+            <HardDrive size={12} />
             ACROSS ALL EVENTS
           </div>
         </div>
       </section>
 
       {/* Recent Events */}
-      <section className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 mb-10">
+      <section className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 mb-10 border border-zinc-50">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold tracking-tight text-zinc-900">Recent Events</h3>
           <button
             onClick={() => navigate('/events')}
-            className="text-xs font-bold text-amber-700 tracking-widest uppercase hover:underline"
+            className="text-xs font-bold text-teal-700 tracking-widest uppercase hover:underline"
           >
             View All
           </button>
@@ -186,7 +173,7 @@ export default function Studio() {
             <p className="text-sm mb-5">Create your first event to get started.</p>
             <button
               onClick={() => navigate('/createevent')}
-              className="silk-gradient text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow hover:opacity-90 active:scale-95 transition-all"
+              className="bg-teal-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg hover:bg-teal-800 active:scale-95 transition-all"
             >
               Create Event
             </button>

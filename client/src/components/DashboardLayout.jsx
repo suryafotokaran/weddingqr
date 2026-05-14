@@ -42,9 +42,6 @@ export default function DashboardLayout({ children }) {
   const navItems = [
     { name: 'Overview', icon: LayoutDashboard, path: '/studio' },
     { name: 'Events', icon: CalendarDays, path: '/events' },
-    { name: 'Plans', icon: ShoppingCart, path: '/pricing' },
-    { name: 'Payment History', icon: Receipt, path: '/payments' },
-    { name: 'User Management', icon: Users, path: '#' },
     { name: 'Selection Logs', icon: ScrollText, path: '#' },
     { name: 'Analytics', icon: BarChart2, path: '#' },
   ];
