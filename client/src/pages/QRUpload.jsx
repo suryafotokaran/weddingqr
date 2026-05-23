@@ -15,6 +15,7 @@ import {
   Eye, EyeOff, Trash2, Square, CheckSquare, MonitorOff, Palette,
   FolderOpen,
 } from 'lucide-react';
+import { generatePreviewUrl, filterAllowedFiles } from '../lib/previewGenerator';
 import * as faceapi from '@vladmandic/face-api';
 import { loadModels, extractMultipleEmbeddings } from '../lib/faceApi';
 
@@ -135,7 +136,8 @@ export default function QRUpload() {
         for await (const entry of dirHandle.values()) {
           if (entry.kind === 'file') {
             const file = await entry.getFile();
-            if (file.type.startsWith('image/')) files.push(file);
+            // Accept all files (including raw formats)
+        files.push(file);
           }
         }
         if (files.length) {
@@ -208,7 +210,10 @@ export default function QRUpload() {
   const stageFiles = useCallback(async (files) => {
     if (!user || !event) return;
 
-    const validFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    const { allowed: validFiles, rejected } = filterAllowedFiles(Array.from(files));
+    if (rejected.length > 0) {
+      setTimeout(() => showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`), 0);
+    }
     if (!validFiles.length) return;
 
     setStagedFiles(prev => {
@@ -224,8 +229,14 @@ export default function QRUpload() {
       const newItems = uniqueFiles.map(f => ({
         id:         Math.random().toString(36).slice(2),
         file:       f,
-        previewUrl: URL.createObjectURL(f),
+        previewUrl: null,
       }));
+      // Generate previews asynchronously (including RAW/PSD)
+      uniqueFiles.forEach((f, idx) => {
+        generatePreviewUrl(f).then(url => {
+          setStagedFiles(prev => prev.map(s => s.id === newItems[idx].id ? { ...s, previewUrl: url } : s));
+        }).catch(() => {});
+      });
       return [...prev, ...newItems];
     });
   }, [user, event, photos]);
@@ -759,7 +770,7 @@ export default function QRUpload() {
             )}
           </div>
 
-          <input ref={fileInputRef} type="file" multiple accept="image/*" className="hidden" onChange={handleFilePick} />
+          <input ref={fileInputRef} type="file" multiple accept="*" className="hidden" onChange={handleFilePick} />
           <input
             ref={folderInputRef}
             type="file"
@@ -875,10 +886,18 @@ export default function QRUpload() {
                       <X size={12} />
                     </button>
                   </div>
-                  {staged.previewUrl
-                    ? <img src={staged.previewUrl} alt="" className="w-full h-full object-cover" />
-                    : <ImageIcon className="w-full h-full p-4 text-zinc-300" />
-                  }
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-100">
+                    <ImageIcon size={20} className="text-zinc-300 mb-1" />
+                    <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wide">.{staged.file.name.split('.').pop()}</span>
+                  </div>
+                  {staged.previewUrl && (
+                    <img
+                      src={staged.previewUrl}
+                      alt=""
+                      className="absolute inset-0 w-full h-full object-cover"
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                  )}
                 </div>
               ))}
             </div>

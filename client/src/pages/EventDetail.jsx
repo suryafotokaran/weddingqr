@@ -11,8 +11,10 @@ import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ImageIcon,
   CalendarDays, Tag, Images, CloudUpload, ArrowLeft, FolderOpen,
   Lock, Copy, Check, Trash2, Download, Square, CheckSquare,
-  Eye, EyeOff, Heart, MonitorOff, Users, RotateCcw, Clock, MessageCircle, Send, Pencil
+  Eye, EyeOff, Heart, MonitorOff, Users, RotateCcw, Clock, MessageCircle, Send, Pencil,
+  FolderOutput, FileSearch,
 } from 'lucide-react';
+import { generatePreviewUrl, filterAllowedFiles } from '../lib/previewGenerator';
 
 const getCompressionOptions = (maxMb) => ({
   maxSizeMB:        Math.min(maxMb, 2),
@@ -120,11 +122,19 @@ function UploadItem({ item }) {
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-xl bg-zinc-50 border border-zinc-100">
-      <div className="w-10 h-10 rounded-lg bg-zinc-200 flex items-center justify-center shrink-0 overflow-hidden">
-        {item.previewUrl
-          ? <img src={item.previewUrl} className="w-full h-full object-cover" alt="" />
-          : <ImageIcon size={18} className="text-zinc-400" />
-        }
+      <div className="relative w-10 h-10 rounded-lg bg-zinc-200 flex items-center justify-center shrink-0 overflow-hidden">
+        <div className="flex flex-col items-center justify-center">
+          <ImageIcon size={14} className="text-zinc-400" />
+          <span className="text-[6px] font-bold text-zinc-400 uppercase">.{item.file.name.split('.').pop()}</span>
+        </div>
+        {item.previewUrl && (
+          <img
+            src={item.previewUrl}
+            className="absolute inset-0 w-full h-full object-cover"
+            alt=""
+            onError={(e) => { e.target.style.display = 'none'; }}
+          />
+        )}
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-zinc-800 truncate">{item.file.name}</p>
@@ -342,27 +352,30 @@ export default function EventDetail() {
   // ── Stage files (local preview) ───────────────────────────────────────────
   const stageFiles = useCallback((files) => {
     if (!user || !event) return;
-    const imageFiles = Array.from(files).filter(f => {
-      if (!f.type.startsWith('image/')) {
-        showToast('error', 'Invalid file', `"${f.name}" is not an image.`);
-        return false;
-      }
-      return true;
-    });
-    if (!imageFiles.length) return;
+    const { allowed: allFiles, rejected } = filterAllowedFiles(Array.from(files));
+    if (rejected.length > 0) {
+      setTimeout(() => showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`), 0);
+    }
+    if (!allFiles.length) return;
     setStagedFiles(prev => {
       const uploadedNames = new Set(photos.map(p => p.file_name));
       const stagedNames   = new Set(prev.map(s => s.file.name));
-      const unique        = imageFiles.filter(f => !uploadedNames.has(f.name) && !stagedNames.has(f.name));
-      const dupeCount     = imageFiles.length - unique.length;
+      const unique        = allFiles.filter(f => !uploadedNames.has(f.name) && !stagedNames.has(f.name));
+      const dupeCount     = allFiles.length - unique.length;
       if (dupeCount > 0) {
         setTimeout(() => showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`), 0);
       }
       const newItems = unique.map(f => ({
         id:         Math.random().toString(36).slice(2),
         file:       f,
-        previewUrl: URL.createObjectURL(f),
+        previewUrl: null,
       }));
+      // Generate previews asynchronously (including RAW/PSD)
+      unique.forEach((f, idx) => {
+        generatePreviewUrl(f).then(url => {
+          setStagedFiles(prev => prev.map(s => s.id === newItems[idx].id ? { ...s, previewUrl: url } : s));
+        }).catch(() => {});
+      });
       return [...prev, ...newItems];
     });
   }, [user, event, photos]);
@@ -518,7 +531,7 @@ export default function EventDetail() {
         for await (const entry of dirHandle.values()) {
           if (entry.kind === 'file') {
             const file = await entry.getFile();
-            if (file.type.startsWith('image/')) files.push(file);
+            files.push(file);
           }
         }
         if (files.length) {
@@ -537,6 +550,133 @@ export default function EventDetail() {
   const handleUnlockGuest = async (submissionId) => {
     await supabase.from('guest_submissions').update({ is_locked: false }).eq('id', submissionId);
     await fetchGuestSubmissions();
+  };
+
+  // ── Extract Originals: match guest selections with local folder ──────────
+  const handleExtractOriginals = async (guestId, guestName) => {
+    if (!('showDirectoryPicker' in window)) {
+      showToast('error', 'Not Supported', 'Your browser does not support folder picking. Use Chrome or Edge.');
+      return;
+    }
+
+    setActionLoading({ loading: true, message: 'Fetching selected photos…' });
+
+    try {
+      // 1. Get this guest's selected photo IDs
+      const { data: selections, error: selErr } = await supabase
+        .from('guest_selections')
+        .select('photo_id')
+        .eq('event_id', id)
+        .eq('guest_id', guestId);
+
+      if (selErr) throw selErr;
+      if (!selections?.length) {
+        showToast('error', 'No Selections', 'This guest has no photo selections.');
+        setActionLoading({ loading: false, message: '' });
+        return;
+      }
+
+      // 2. Get filenames for these photo IDs
+      const photoIds = selections.map(s => s.photo_id);
+      const { data: selectedPhotos, error: phErr } = await supabase
+        .from('photos')
+        .select('id, file_name')
+        .in('id', photoIds);
+
+      if (phErr) throw phErr;
+
+      const selectedFileNames = new Set(selectedPhotos.map(p => {
+        // Normalize: strip extension for flexible matching
+        return p.file_name;
+      }));
+
+      // Also create a set without extensions for cross-format matching
+      const selectedBaseNames = new Set(selectedPhotos.map(p => {
+        const parts = p.file_name.split('.');
+        parts.pop();
+        return parts.join('.').toLowerCase();
+      }));
+
+      setActionLoading({ loading: true, message: 'Pick your originals folder…' });
+
+      // 3. Let host pick source folder with originals
+      const sourceDir = await window.showDirectoryPicker({ mode: 'read' });
+
+      setActionLoading({ loading: true, message: 'Scanning folder…' });
+
+      // 4. Scan source folder and match filenames
+      const matchedFiles = [];
+      const unmatchedNames = [];
+
+      for await (const entry of sourceDir.values()) {
+        if (entry.kind !== 'file') continue;
+        const file = await entry.getFile();
+        const baseName = file.name.split('.').slice(0, -1).join('.').toLowerCase();
+
+        // Match by exact filename OR by base name (cross-format: uploaded JPG → match CR3 original)
+        if (selectedFileNames.has(file.name) || selectedBaseNames.has(baseName)) {
+          matchedFiles.push({ handle: entry, file });
+        }
+      }
+
+      // Check which selections had no match
+      const matchedBaseNames = new Set(matchedFiles.map(m => m.file.name.split('.').slice(0, -1).join('.').toLowerCase()));
+      for (const baseName of selectedBaseNames) {
+        if (!matchedBaseNames.has(baseName)) {
+          unmatchedNames.push(baseName);
+        }
+      }
+
+      if (!matchedFiles.length) {
+        showToast('error', 'No Matches', `None of the ${selectedPhotos.length} selected photos were found in "${sourceDir.name}". Make sure filenames match.`);
+        setActionLoading({ loading: false, message: '' });
+        return;
+      }
+
+      setActionLoading({ loading: true, message: `Found ${matchedFiles.length} matches. Pick destination folder…` });
+
+      // 5. Let host pick destination folder
+      const destDir = await window.showDirectoryPicker({ mode: 'readwrite' });
+
+      // Create subfolder named after the guest
+      const folderName = `${guestName || 'Guest'}_Selections`.replace(/[^a-zA-Z0-9_\- ]/g, '_');
+      let outputDir;
+      try {
+        outputDir = await destDir.getDirectoryHandle(folderName, { create: true });
+      } catch {
+        outputDir = destDir;
+      }
+
+      // 6. Copy matched files to destination
+      setActionLoading({ loading: true, message: `Copying ${matchedFiles.length} photos…` });
+
+      let copied = 0;
+      for (const match of matchedFiles) {
+        try {
+          const destFile = await outputDir.getFileHandle(match.file.name, { create: true });
+          const writable = await destFile.createWritable();
+          await writable.write(match.file);
+          await writable.close();
+          copied++;
+          setActionLoading({ loading: true, message: `Copying ${copied}/${matchedFiles.length} photos…` });
+        } catch (copyErr) {
+          console.error(`Failed to copy ${match.file.name}:`, copyErr);
+        }
+      }
+
+      const unmatchedMsg = unmatchedNames.length > 0
+        ? ` (${unmatchedNames.length} not found in source folder)`
+        : '';
+      showToast('success', 'Originals Extracted!', `${copied} original photo${copied !== 1 ? 's' : ''} copied to "${folderName}"${unmatchedMsg}`);
+
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Extract originals error:', err);
+        showToast('error', 'Error', err.message);
+      }
+    } finally {
+      setActionLoading({ loading: false, message: '' });
+    }
   };
 
   // Photo quota
@@ -1029,7 +1169,7 @@ export default function EventDetail() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/*"
+            accept="*"
             className="hidden"
             onChange={handleFilePick}
           />
@@ -1155,10 +1295,18 @@ export default function EventDetail() {
                       <X size={12} />
                     </button>
                   </div>
-                  {staged.previewUrl
-                    ? <img src={staged.previewUrl} alt="" className="w-full h-full object-cover" />
-                    : <ImageIcon className="w-full h-full p-4 text-zinc-300" />
-                  }
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-100">
+                    <ImageIcon size={20} className="text-zinc-300 mb-1" />
+                    <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wide">.{staged.file.name.split('.').pop()}</span>
+                  </div>
+                  {staged.previewUrl && (
+                    <img
+                      src={staged.previewUrl}
+                      alt=""
+                      className="absolute inset-0 w-full h-full object-cover"
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -1205,6 +1353,13 @@ export default function EventDetail() {
                         Re-selection Open
                       </span>
                     )}
+                    <button
+                      onClick={() => handleExtractOriginals(sub.guest_id, sub.guest_name)}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 transition-all active:scale-95"
+                      title="Match selected photos with your local originals folder"
+                    >
+                      <FolderOutput size={13} /> Extract Originals
+                    </button>
                     {sub.is_locked && (
                       <button
                         onClick={() => handleUnlockGuest(sub.id)}
@@ -1496,7 +1651,7 @@ export default function EventDetail() {
       <input
         ref={replaceInputRef}
         type="file"
-        accept="image/*"
+        accept="*"
         className="hidden"
         onChange={handleReplacePhoto}
       />

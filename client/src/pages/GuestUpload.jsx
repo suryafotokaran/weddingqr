@@ -7,6 +7,7 @@ import {
   X, CheckCircle, AlertCircle, Loader2, ImageIcon,
   Camera, Images, QrCode, Tag, CalendarDays, FolderOpen,
 } from 'lucide-react';
+import { generatePreviewUrl, filterAllowedFiles } from '../lib/previewGenerator';
 import * as faceapi from '@vladmandic/face-api';
 
 function formatBytes(bytes) {
@@ -32,11 +33,19 @@ function UploadItem({ item }) {
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-xl bg-white/60 border border-white/80 backdrop-blur-sm">
-      <div className="w-10 h-10 rounded-xl bg-zinc-200 flex items-center justify-center shrink-0 overflow-hidden">
-        {item.previewUrl
-          ? <img src={item.previewUrl} className="w-full h-full object-cover" alt="" />
-          : <ImageIcon size={18} className="text-zinc-400" />
-        }
+      <div className="relative w-10 h-10 rounded-xl bg-zinc-200 flex items-center justify-center shrink-0 overflow-hidden">
+        <div className="flex flex-col items-center justify-center">
+          <ImageIcon size={14} className="text-zinc-400" />
+          <span className="text-[6px] font-bold text-zinc-400 uppercase">.{item.name.split('.').pop()}</span>
+        </div>
+        {item.previewUrl && (
+          <img
+            src={item.previewUrl}
+            className="absolute inset-0 w-full h-full object-cover"
+            alt=""
+            onError={(e) => { e.target.style.display = 'none'; }}
+          />
+        )}
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-zinc-800 truncate">{item.name}</p>
@@ -92,7 +101,8 @@ export default function GuestUpload() {
         for await (const entry of dirHandle.values()) {
           if (entry.kind === 'file') {
             const file = await entry.getFile();
-            if (file.type.startsWith('image/')) files.push(file);
+            // Accept all files (including raw formats)
+            files.push(file);
           }
         }
         if (files.length) {
@@ -154,8 +164,7 @@ export default function GuestUpload() {
   const uploadFiles = useCallback(async (files) => {
     if (!event) return;
 
-    // Filter to images only
-    const validFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    const { allowed: validFiles } = filterAllowedFiles(Array.from(files));
     if (!validFiles.length) return;
 
     // Storage check (pre-upload)
@@ -172,11 +181,18 @@ export default function GuestUpload() {
       status:     'pending',
       progress:   0,
       error:      null,
-      previewUrl: URL.createObjectURL(f),
+      previewUrl: null,
       file:       f,
     }));
 
     setUploading(prev => [...newItems, ...prev]);
+
+    // Generate previews asynchronously (including RAW/PSD)
+    validFiles.forEach((f, idx) => {
+      generatePreviewUrl(f).then(url => {
+        setUploading(prev => prev.map(u => u.id === newItems[idx].id ? { ...u, previewUrl: url } : u));
+      }).catch(() => {});
+    });
 
     for (const item of newItems) {
       try {
@@ -363,7 +379,7 @@ export default function GuestUpload() {
                     : 'Share your photos'}
                 </p>
                 <p className="text-sm text-zinc-400 mt-1">Tap to pick photos or drop them here</p>
-                <p className="text-[11px] text-zinc-300 mt-0.5">Supports JPG, PNG, HEIC, WEBP · Images auto-compressed</p>
+                <p className="text-[11px] text-zinc-300 mt-0.5">Supports JPG, PNG, HEIC, WEBP, RAW, TIFF, PSD & more · Images auto-compressed</p>
               </div>
 
               <div className="flex gap-3" onClick={e => e.stopPropagation()}>
@@ -390,7 +406,7 @@ export default function GuestUpload() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*"
+              accept="*"
               className="hidden"
               onChange={handleFilePick}
             />

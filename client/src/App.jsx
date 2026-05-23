@@ -16,6 +16,8 @@ import GuestEventView from './pages/GuestEventView';
 import QRUpload from './pages/QRUpload';
 import GuestUpload from './pages/GuestUpload';
 import QRView from './pages/QRView';
+import WebsiteBuilder from './pages/website/WebsiteBuilder';
+import PublicWebsite from './pages/website/PublicWebsite';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
@@ -35,7 +37,9 @@ export default function App() {
       <Route path="/events/:id" element={<ProtectedRoute><EventLanding /></ProtectedRoute>} />
       <Route path="/events/:id/photos" element={<ProtectedRoute><EventDetail /></ProtectedRoute>} />
       <Route path="/events/:id/qr-upload" element={<ProtectedRoute><QRUpload /></ProtectedRoute>} />
+      <Route path="/events/:id/website" element={<ProtectedRoute><WebsiteBuilder /></ProtectedRoute>} />
 
+      <Route path="/w/:eventId" element={<PublicWebsite />} />
       <Route path="/upload/:id" element={<GuestUpload />} />
       <Route path="/v/:id" element={<GuestEventView />} />
       <Route path="/qr/:id" element={<QRView />} />

@@ -6,8 +6,6 @@ import {
   LayoutDashboard,
   CloudUpload,
   Users,
-  ScrollText,
-  BarChart2,
   ShoppingCart,
   User,
   Settings,
@@ -42,8 +40,6 @@ export default function DashboardLayout({ children }) {
   const navItems = [
     { name: 'Overview', icon: LayoutDashboard, path: '/studio' },
     { name: 'Events', icon: CalendarDays, path: '/events' },
-    { name: 'Selection Logs', icon: ScrollText, path: '#' },
-    { name: 'Analytics', icon: BarChart2, path: '#' },
   ];
 
   return (

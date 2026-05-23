@@ -16,7 +16,10 @@
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/react-query": "^5.95.2",
     "@vladmandic/face-api": "^1.7.15",
+    "@webtoon/psd": "^0.4.0",
     "browser-image-compression": "^2.0.2",
+    "exifr": "^7.1.3",
+    "libraw-wasm": "^1.1.2",
     "lucide-react": "^1.1.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.4",
@@ -33,6 +36,8 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
   }
 }

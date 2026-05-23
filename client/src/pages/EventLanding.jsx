@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2
+  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, Globe, Copy, Check
 } from 'lucide-react';
 import { deleteFromR2 } from '../lib/s3';
 import ConfirmModal from '../components/ConfirmModal';
@@ -39,6 +39,8 @@ export default function EventLanding() {
   const [hoveredCard, setHoveredCard] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
+  const [websiteConfig, setWebsiteConfig] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
 
@@ -70,6 +72,14 @@ export default function EventLanding() {
       }
 
       setLoading(false);
+
+      // Fetch website config
+      const { data: wc } = await supabase
+        .from('website_configs')
+        .select('is_published, template_id')
+        .eq('event_id', id)
+        .maybeSingle();
+      setWebsiteConfig(wc);
     };
     fetchData();
   }, [id, userId]);
@@ -268,6 +278,57 @@ export default function EventLanding() {
 
               <div className="flex items-center gap-1.5 text-violet-600 font-bold text-sm group-hover:gap-2.5 transition-all duration-200">
                 Open QR Upload <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Website Builder Card — full width below */}
+        <div className="mt-6">
+          <button
+            onClick={() => navigate(`/events/${id}/website`)}
+            onMouseEnter={() => setHoveredCard('website')}
+            onMouseLeave={() => setHoveredCard(null)}
+            className="group relative w-full text-left bg-white rounded-2xl border-2 border-zinc-100 shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 hover:border-rose-300 hover:shadow-[0_20px_60px_rgba(194,130,110,0.14)] transition-all duration-300 active:scale-[0.98] overflow-hidden"
+          >
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-br from-rose-50/60 via-transparent to-transparent" />
+            <div className="relative flex flex-col md:flex-row md:items-center gap-6">
+              <div className="flex items-start gap-5">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-400 to-rose-600 flex items-center justify-center shadow-lg shadow-rose-500/25 group-hover:scale-105 transition-transform duration-300 shrink-0">
+                  <Globe size={26} className="text-white" />
+                </div>
+                <div>
+                  {websiteConfig?.is_published && (
+                    <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" /> Published
+                    </span>
+                  )}
+                  {websiteConfig && !websiteConfig.is_published && (
+                    <span className="inline-flex items-center gap-1 bg-zinc-100 text-zinc-500 text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-2">Draft</span>
+                  )}
+                  <h2 className="text-xl font-extrabold text-zinc-900 mb-1 tracking-tight">Website Builder</h2>
+                  <p className="text-sm text-zinc-500 leading-relaxed">
+                    Create a beautiful wedding website. Pick a template, fill in your details, and share the link with family &amp; friends.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 md:ml-auto shrink-0 items-center">
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(`${window.location.origin}/w/${id}`).then(() => {
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2000);
+                    });
+                  }}
+                  title="Copy shareable link"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 font-bold text-sm hover:bg-rose-100 transition-all"
+                >
+                  {copiedLink ? <><Check size={14}/> Copied!</> : <><Copy size={14}/> Share Link</>}
+                </button>
+                <div className="flex items-center gap-1.5 text-rose-600 font-bold text-sm group-hover:gap-2.5 transition-all duration-200 px-2">
+                  Open Builder <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
+                </div>
               </div>
             </div>
           </button>
