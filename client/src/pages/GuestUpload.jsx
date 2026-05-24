@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { uploadToR2, buildR2RefUrl } from '../lib/s3';
+import { uploadToR2, buildR2RefUrl, getSignedPhotoUrls } from '../lib/s3';
 import imageCompression from 'browser-image-compression';
 import {
   X, CheckCircle, AlertCircle, Loader2, ImageIcon,
@@ -9,6 +10,32 @@ import {
 } from 'lucide-react';
 import { generatePreviewUrl, filterAllowedFiles } from '../lib/previewGenerator';
 import * as faceapi from '@vladmandic/face-api';
+
+const PAGE_SIZE = 20;
+
+async function fetchPhotosPage({ pageParam, eventId }) {
+  const from = pageParam * PAGE_SIZE;
+  const to   = from + PAGE_SIZE - 1;
+
+  const { data, error } = await supabase
+    .from('photos')
+    .select('id, storage_path, file_name, created_at, supabase_url')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw error;
+
+  const photos     = data ?? [];
+  const signedUrls = photos.length > 0 ? await getSignedPhotoUrls(photos) : {};
+
+  return {
+    photos,
+    signedUrls,
+    // if we got a full page, there might be more
+    nextPage: photos.length === PAGE_SIZE ? pageParam + 1 : undefined,
+  };
+}
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -77,6 +104,7 @@ const getCompressionOptions = (maxMb) => ({
 
 export default function GuestUpload() {
   const { id } = useParams();
+  const queryClient = useQueryClient();
 
   const [event,        setEvent]        = useState(null);
   const [loading,      setLoading]      = useState(true);
@@ -89,6 +117,42 @@ export default function GuestUpload() {
 
   const fileInputRef   = useRef(null);
   const folderInputRef = useRef(null);
+  const sentinelRef    = useRef(null);
+
+  // ── Gallery: paginated photos for this event ──────────────────────────────
+  const {
+    data:               galleryData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey:        ['guest-upload-photos', id],
+    queryFn:         ({ pageParam }) => fetchPhotosPage({ pageParam, eventId: id }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+    enabled:          !!event,   // only run after event is loaded
+    staleTime:        30_000,    // 30 s — don't refetch on every focus
+  });
+
+  const galleryPhotos = galleryData?.pages.flatMap(p => p.photos) ?? [];
+  // merge signedUrls across all pages into one lookup map
+  const signedUrls = Object.assign({}, ...(galleryData?.pages.map(p => p.signedUrls) ?? []));
+
+  // IntersectionObserver — triggers next page fetch when sentinel scrolls into view
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !event) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { rootMargin: '300px' }, // pre-trigger 300 px before reaching bottom
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, event]);
   const [selectedFolderName, setSelectedFolderName] = useState(null);
 
   const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
@@ -250,6 +314,8 @@ export default function GuestUpload() {
         setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'done', progress: 100 } : u));
         setDoneCount(n => n + 1);
         setStorageUsed(prev => prev + compressed.size);
+        // refresh gallery so the newly uploaded photo appears at the top
+        queryClient.invalidateQueries({ queryKey: ['guest-upload-photos', id] });
 
       } catch (err) {
         setUploading(prev => prev.map(u => u.id === item.id ? { ...u, status: 'error', error: err.message } : u));
@@ -460,6 +526,42 @@ export default function GuestUpload() {
               >
                 Upload More Photos
               </button>
+            </div>
+          )}
+
+          {/* Event Photo Gallery */}
+          {galleryPhotos.length > 0 && (
+            <div className="bg-white/70 backdrop-blur-sm rounded-2xl border border-white/80 shadow-sm p-5">
+              <h3 className="font-bold text-zinc-900 text-sm flex items-center gap-2 mb-3">
+                <Images size={16} className="text-violet-500" />
+                Event Photos
+                <span className="ml-auto text-[11px] font-normal text-zinc-400">{galleryPhotos.length} loaded</span>
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {galleryPhotos.map(photo => {
+                  const url = signedUrls[photo.id] || photo.supabase_url;
+                  return (
+                    <div key={photo.id} className="aspect-square rounded-xl overflow-hidden bg-zinc-100">
+                      {url
+                        ? <img src={url} alt={photo.file_name} className="w-full h-full object-cover" loading="lazy" />
+                        : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-zinc-300" /></div>
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Sentinel — IntersectionObserver watches this */}
+              <div ref={sentinelRef} className="h-1 mt-2" />
+
+              {isFetchingNextPage && (
+                <div className="flex justify-center pt-3">
+                  <Loader2 size={20} className="animate-spin text-violet-400" />
+                </div>
+              )}
+              {!hasNextPage && galleryPhotos.length > 0 && (
+                <p className="text-center text-[11px] text-zinc-300 pt-3">All photos loaded</p>
+              )}
             </div>
           )}
 
