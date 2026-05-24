@@ -278,20 +278,23 @@ export default function GuestEventView() {
   }
 
   // Infinite scroll: fetch next page when sentinel comes into view
+  const photosQueryRef = useRef(photosQuery);
+  photosQueryRef.current = photosQuery;
+
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && photosQuery.hasNextPage && !photosQuery.isFetchingNextPage) {
-          photosQuery.fetchNextPage();
+        if (entry.isIntersecting && photosQueryRef.current.hasNextPage && !photosQueryRef.current.isFetchingNextPage) {
+          photosQueryRef.current.fetchNextPage();
         }
       },
       { rootMargin: '300px' }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [photosQuery.hasNextPage, photosQuery.isFetchingNextPage, photosQuery.fetchNextPage]);
+  }, []); // stable — reads latest query state via ref
 
   const handlePasswordSubmit = (e) => {
     e.preventDefault();
@@ -613,7 +616,6 @@ export default function GuestEventView() {
                     src={getPhotoUrl(photo)}
                     alt={photo.file_name}
                     className="w-full h-full object-cover pointer-events-none"
-                    loading="lazy"
                   />
                 ) : (
                   <div className="flex items-center justify-center w-full h-full">
