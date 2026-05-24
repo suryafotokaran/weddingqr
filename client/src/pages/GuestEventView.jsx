@@ -608,6 +608,7 @@ export default function GuestEventView() {
             <p className="text-zinc-400 text-xs mt-1">Select the photos you want to keep them here!</p>
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {visiblePhotos.slice(0, renderedCount).map((photo, idx) => (
               <div
@@ -646,6 +647,7 @@ export default function GuestEventView() {
               <Loader2 size={24} className="animate-spin text-zinc-300" />
             </div>
           )}
+          </>
         )}
       </main>
 
