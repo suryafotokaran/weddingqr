@@ -248,9 +248,10 @@ export default function GuestEventView() {
         .from('events')
         .select('*')
         .eq('id', id)
-        .single();
+        .maybeSingle();
 
       if (eventError) throw eventError;
+      if (!eventData) throw new Error('Event not found');
       setEvent(eventData);
 
       // If link is disabled, stop here
