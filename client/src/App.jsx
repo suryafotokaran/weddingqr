@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import SignIn from './pages/auth/SignIn';
 import SignUp from './pages/auth/SignUp';
@@ -44,11 +44,14 @@ function AppContent() {
       <ScrollToTop />
       {!isAdminRoute && <FloatingButtons />}
       <Routes>
-        {/* Photo public website */}
-        <Route path="/" element={<PhotoHomePage />} />
-        <Route path="/gallery" element={<FullGallery />} />
-        <Route path="/categories" element={<CategoriesPage />} />
-        <Route path="/category/:categoryId" element={<CategoryPhotosPage />} />
+        {/* Photo public website — PhotoProvider only mounts on these routes */}
+        <Route element={<PhotoProvider><Outlet /></PhotoProvider>}>
+          <Route path="/" element={<PhotoHomePage />} />
+          <Route path="/gallery" element={<FullGallery />} />
+          <Route path="/categories" element={<CategoriesPage />} />
+          <Route path="/category/:categoryId" element={<CategoryPhotosPage />} />
+          <Route path="/portfolio/:portfolioId" element={<DynamicCategoryPage />} />
+        </Route>
 
         {/* Auth */}
         <Route path="/signin" element={<SignIn />} />
@@ -80,18 +83,12 @@ function AppContent() {
         <Route path="/v/:id" element={<GuestEventView />} />
         <Route path="/qr/:id" element={<QRView />} />
 
-        {/* Portfolio detail page */}
-        <Route path="/portfolio/:portfolioId" element={<DynamicCategoryPage />} />
       </Routes>
     </>
   );
 }
 
 export default function App() {
-  return (
-    <PhotoProvider>
-      <AppContent />
-    </PhotoProvider>
-  );
+  return <AppContent />;
 }
 

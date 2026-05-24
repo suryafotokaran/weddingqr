@@ -1,7 +1,33 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { getSignedPhotoUrls } from '../lib/s3';
+
+const PAGE_SIZE = 20;
+
+async function fetchPhotosPage({ pageParam, eventId }) {
+  const from = pageParam * PAGE_SIZE;
+  const to   = from + PAGE_SIZE - 1;
+
+  const { data, error } = await supabase
+    .from('photos')
+    .select('id, storage_path, file_name, created_at, supabase_url')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw error;
+
+  const photos     = data ?? [];
+  const signedUrls = photos.length > 0 ? await getSignedPhotoUrls(photos) : {};
+
+  return {
+    photos,
+    signedUrls,
+    nextPage: photos.length === PAGE_SIZE ? pageParam + 1 : undefined,
+  };
+}
 import { Loader2, Lock, Image as ImageIcon, Heart, ShieldAlert, Download, Eye, EyeOff, ChevronLeft, ChevronRight, X, CheckCircle, Send, MessageCircle } from 'lucide-react';
 
 function SkeletonBlock({ className = "" }) {
@@ -54,7 +80,6 @@ function GuestSkeleton() {
 export default function GuestEventView() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
-  const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [password, setPassword] = useState('');
@@ -63,25 +88,31 @@ export default function GuestEventView() {
   const [favorites, setFavorites] = useState(new Set());
   const [isDownloading, setIsDownloading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [activeTab, setActiveTab] = useState('all'); // 'all' or 'favorites'
-  const [signedUrls, setSignedUrls] = useState({});  // { photoId → signedUrl }
-  const [modalIndex, setModalIndex] = useState(null); // index into filtered photos
-  const [submission, setSubmission] = useState(null);   // null = not submitted yet
+  const [activeTab, setActiveTab] = useState('all');
+  const [modalIndex, setModalIndex] = useState(null);
+  const [submission, setSubmission] = useState(null);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submitName, setSubmitName] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [photoComments, setPhotoComments] = useState({}); // photoId → [{...}]
+  const [photoComments, setPhotoComments] = useState({});
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [limitWarning, setLimitWarning] = useState(false);
-  const PAGE_SIZE = 20;
-  const [renderedCount, setRenderedCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef(null);
 
-  useEffect(() => {
-    setRenderedCount(PAGE_SIZE);
-  }, [activeTab]);
+  // ── Server-side paginated photos ─────────────────────────────────────────
+  const photosQuery = useInfiniteQuery({
+    queryKey:         ['event-photos', id],
+    queryFn:          ({ pageParam }) => fetchPhotosPage({ pageParam, eventId: id }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+    enabled:          isAuthenticated && !!event && event.is_public,
+    staleTime:        30_000,
+  });
+
+  const allPhotos  = photosQuery.data?.pages.flatMap(p => p.photos) ?? [];
+  const signedUrls = Object.assign({}, ...(photosQuery.data?.pages.map(p => p.signedUrls) ?? []));
 
   const [guestId, setGuestId] = useState(() => {
     const saved = localStorage.getItem('guest_id');
@@ -91,11 +122,10 @@ export default function GuestEventView() {
     return newId;
   });
 
-  // Returns the best display URL for a photo
   const getPhotoUrl = (photo) => signedUrls[photo.id] || photo.supabase_url || null;
 
-  // Filtered list used by both grid and modal
-  const visiblePhotos = photos.filter(p => activeTab === 'all' || favorites.has(p.id));
+  // 'all' shows everything loaded so far; 'favorites' filters to hearted photos
+  const visiblePhotos = allPhotos.filter(p => activeTab === 'all' || favorites.has(p.id));
 
   const closeModal = useCallback(() => setModalIndex(null), []);
   const prevPhoto  = useCallback(() => setModalIndex(i => (i - 1 + visiblePhotos.length) % visiblePhotos.length), [visiblePhotos.length]);
@@ -229,16 +259,14 @@ export default function GuestEventView() {
         return;
       }
 
-      // If no password is set, fetch photos immediately
+      // If no password is set, mark authenticated (useInfiniteQuery will auto-fetch)
       if (!eventData.password) {
         setIsAuthenticated(true);
-        fetchPhotos();
       } else {
         // Check for stored password
         const savedPwd = localStorage.getItem(`pwd_${id}`);
         if (savedPwd === eventData.password) {
           setIsAuthenticated(true);
-          fetchPhotos();
         }
       }
     } catch (err) {
@@ -252,41 +280,21 @@ export default function GuestEventView() {
     }
   }
 
-  async function fetchPhotos() {
-    try {
-      const { data, error } = await supabase
-        .from('photos')
-        .select('*')
-        .eq('event_id', id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setPhotos(data);
-      // Sign all URLs immediately — this is pure HMAC (no network), takes <50ms for 1000 photos
-      const urls = await getSignedPhotoUrls(data);
-      if (Object.keys(urls).length) setSignedUrls(urls);
-    } catch (err) {
-      console.error('Error fetching photos:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Infinite scroll: load more when sentinel comes into view
+  // Infinite scroll: fetch next page when sentinel comes into view
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && renderedCount < visiblePhotos.length) {
-          setRenderedCount(prev => Math.min(prev + PAGE_SIZE, visiblePhotos.length));
+        if (entry.isIntersecting && photosQuery.hasNextPage && !photosQuery.isFetchingNextPage) {
+          photosQuery.fetchNextPage();
         }
       },
-      { rootMargin: '300px' } // pre-trigger 300px before bottom — user never waits
+      { rootMargin: '300px' }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [renderedCount, visiblePhotos.length]);
+  }, [photosQuery.hasNextPage, photosQuery.isFetchingNextPage, photosQuery.fetchNextPage]);
 
   const handlePasswordSubmit = (e) => {
     e.preventDefault();
@@ -294,7 +302,6 @@ export default function GuestEventView() {
       localStorage.setItem(`pwd_${id}`, password);
       setIsAuthenticated(true);
       setAuthError('');
-      fetchPhotos();
     } else {
       setAuthError('Incorrect password. Please try again.');
     }
@@ -370,7 +377,7 @@ export default function GuestEventView() {
   };
 
   const handleDownloadFavorites = async () => {
-    const favPhotos = photos.filter(p => favorites.has(p.id));
+    const favPhotos = allPhotos.filter(p => favorites.has(p.id));
     if (favPhotos.length === 0) return;
 
     setIsDownloading(true);
@@ -500,7 +507,7 @@ export default function GuestEventView() {
           <div className="flex items-center justify-between mb-2">
             <div>
               <h1 className="text-xl font-black text-zinc-900 leading-tight">{event.name}</h1>
-              <p className="text-[10px] font-bold text-teal-600 uppercase tracking-widest">{event.type} • {photos.length} Photos</p>
+              <p className="text-[10px] font-bold text-teal-600 uppercase tracking-widest">{event.type} • {allPhotos.length} Photos</p>
             </div>
             <div className="w-10 h-10 rounded-full bg-zinc-50 flex items-center justify-center text-zinc-400 shrink-0">
               <ImageIcon size={20} />
@@ -579,7 +586,7 @@ export default function GuestEventView() {
 
       {/* Grid */}
       <main className="max-w-6xl mx-auto p-6">
-        {photos.length === 0 ? (
+        {photosQuery.isLoading ? null : allPhotos.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
             <div className="w-16 h-16 rounded-3xl bg-zinc-100 flex items-center justify-center text-zinc-300 mb-4">
               <ImageIcon size={32} />
@@ -598,7 +605,7 @@ export default function GuestEventView() {
         ) : (
           <>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {visiblePhotos.slice(0, renderedCount).map((photo, idx) => (
+            {visiblePhotos.map((photo, idx) => (
               <div
                 key={photo.id}
                 onClick={() => setModalIndex(idx)}
@@ -630,11 +637,11 @@ export default function GuestEventView() {
             ))}
           </div>
           {/* Infinite scroll sentinel */}
-          {renderedCount < visiblePhotos.length && (
-            <div ref={sentinelRef} className="flex justify-center py-8">
+          <div ref={sentinelRef} className="flex justify-center py-8">
+            {photosQuery.isFetchingNextPage && (
               <Loader2 size={24} className="animate-spin text-zinc-300" />
-            </div>
-          )}
+            )}
+          </div>
           </>
         )}
       </main>
