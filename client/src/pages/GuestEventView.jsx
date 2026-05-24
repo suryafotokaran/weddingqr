@@ -272,11 +272,7 @@ export default function GuestEventView() {
     } catch (err) {
       setError(err.message);
     } finally {
-      const hasAccess = !eventData?.password || (eventData?.password && localStorage.getItem(`pwd_${id}`) === eventData.password);
-      if (hasAccess) setLoading(false);
-      // If it has a password and no saved match, loading stays true until password form is shown? 
-      // Actually, if it has a password, we show the password screen, so loading should be false then too.
-      if (eventData?.password) setLoading(false);
+      setLoading(false);
     }
   }
 
