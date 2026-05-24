@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getSignedPhotoUrls } from '../lib/s3';
@@ -75,6 +75,15 @@ export default function GuestEventView() {
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [limitWarning, setLimitWarning] = useState(false);
+  const PAGE_SIZE = 20;
+  const [renderedCount, setRenderedCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef(null);
+  const signingQueueRef = useRef(new Set());
+
+  useEffect(() => {
+    setRenderedCount(PAGE_SIZE);
+  }, [activeTab]);
+
   const [guestId, setGuestId] = useState(() => {
     const saved = localStorage.getItem('guest_id');
     if (saved) return saved;
@@ -254,16 +263,42 @@ export default function GuestEventView() {
 
       if (error) throw error;
       setPhotos(data);
-
-      // Generate signed URLs for iDrive e2 photos
-      const urls = await getSignedPhotoUrls(data);
-      if (Object.keys(urls).length) setSignedUrls(urls);
+      // URL signing is handled progressively as photos are rendered
     } catch (err) {
       console.error('Error fetching photos:', err);
     } finally {
       setLoading(false);
     }
   }
+
+  // Sign URLs only for currently visible+rendered photos
+  useEffect(() => {
+    const rendered = visiblePhotos.slice(0, renderedCount);
+    const toSign = rendered.filter(
+      p => !signedUrls[p.id] && !signingQueueRef.current.has(p.id)
+    );
+    if (!toSign.length) return;
+    toSign.forEach(p => signingQueueRef.current.add(p.id));
+    getSignedPhotoUrls(toSign).then(urls => {
+      if (Object.keys(urls).length) setSignedUrls(prev => ({ ...prev, ...urls }));
+    });
+  }, [renderedCount, visiblePhotos.length, activeTab]); // eslint-disable-line
+
+  // Infinite scroll: load more when sentinel comes into view
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && renderedCount < visiblePhotos.length) {
+          setRenderedCount(prev => Math.min(prev + PAGE_SIZE, visiblePhotos.length));
+        }
+      },
+      { rootMargin: '300px' } // pre-trigger 300px before bottom — user never waits
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [renderedCount, visiblePhotos.length]);
 
   const handlePasswordSubmit = (e) => {
     e.preventDefault();
@@ -574,7 +609,7 @@ export default function GuestEventView() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {visiblePhotos.map((photo, idx) => (
+            {visiblePhotos.slice(0, renderedCount).map((photo, idx) => (
               <div
                 key={photo.id}
                 onClick={() => setModalIndex(idx)}
@@ -605,6 +640,12 @@ export default function GuestEventView() {
               </div>
             ))}
           </div>
+          {/* Infinite scroll sentinel */}
+          {renderedCount < visiblePhotos.length && (
+            <div ref={sentinelRef} className="flex justify-center py-8">
+              <Loader2 size={24} className="animate-spin text-zinc-300" />
+            </div>
+          )}
         )}
       </main>
 
