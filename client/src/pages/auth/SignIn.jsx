@@ -23,7 +23,7 @@ export default function SignIn() {
     if (error) {
       setError(error.message);
     } else {
-      navigate('/studio');
+      navigate('/admin/studio');
     }
   };
 

@@ -311,7 +311,7 @@ export default function WebsiteBuilder() {
 
       {/* ── TOP NAV BAR ── */}
       <header className="flex items-center gap-3 px-5 py-0 bg-zinc-900 border-b border-zinc-800 shrink-0 h-14">
-        <button onClick={() => navigate(`/events/${eventId}`)} className="flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors">
+        <button onClick={() => navigate(`/admin/events/${eventId}`)} className="flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors">
           <ChevronLeft size={18} />
           <span className="text-sm font-medium hidden sm:block">Back</span>
         </button>

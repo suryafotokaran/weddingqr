@@ -17,9 +17,9 @@ import {
 import { generatePreviewUrl, filterAllowedFiles } from '../lib/previewGenerator';
 
 const getCompressionOptions = (maxMb) => ({
-  maxSizeMB:        Math.min(maxMb, 2),
+  maxSizeMB: Math.min(maxMb, 2),
   maxWidthOrHeight: 3840,
-  useWebWorker:     true,
+  useWebWorker: true,
   preserveExifData: true,
 });
 
@@ -98,7 +98,8 @@ function EventSkeleton() {
         </div>
       </div>
 
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes shimmer {
           0% { transform: translateX(-100%); }
           100% { transform: translateX(100%); }
@@ -114,10 +115,10 @@ function EventSkeleton() {
 
 function UploadItem({ item }) {
   const statusIcon = {
-    pending:   <Loader2 size={16} className="text-zinc-400 animate-spin" />,
+    pending: <Loader2 size={16} className="text-zinc-400 animate-spin" />,
     uploading: <Loader2 size={16} className="text-teal-500 animate-spin" />,
-    done:      <CheckCircle size={16} className="text-teal-600" />,
-    error:     <AlertCircle size={16} className="text-red-500" />,
+    done: <CheckCircle size={16} className="text-teal-600" />,
+    error: <AlertCircle size={16} className="text-red-500" />,
   };
 
   return (
@@ -158,16 +159,18 @@ export default function EventDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: userData } = useCurrentUser();
-  const user = userData?.user;  const [event, setEvent]           = useState(null);
-  const [photos, setPhotos]         = useState([]);
-  const [allPhotos, setAllPhotos]   = useState([]);
+  const user = userData?.user; const [event, setEvent] = useState(null);
+  const [photos, setPhotos] = useState([]);
+  const [allPhotos, setAllPhotos] = useState([]);
   const [stagedFiles, setStagedFiles] = useState([]);
   const [uploadState, setUploadState] = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-  const [quotaModal,  setQuotaModal]  = useState({ show: false, currentUsed: 0, trying: 0 });
-  const [loading, setLoading]       = useState(true);
+  const [quotaModal, setQuotaModal] = useState({ show: false, currentUsed: 0, trying: 0 });
+  const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
-  const [toast, setToast]           = useState(null);
-  const [tempPassword, setTempPassword] = useState('');
+  const [toast, setToast] = useState(null);
+  const [tempPassword,     setTempPassword]     = useState('');
+  const [selectionLimit,   setSelectionLimit]   = useState('');
+  const [savingLimit,      setSavingLimit]       = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
@@ -190,7 +193,7 @@ export default function EventDetail() {
   };
   const closeConfirm = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
   const [signedUrls, setSignedUrls] = useState({});
-  const fileInputRef    = useRef(null);
+  const fileInputRef = useRef(null);
   const cancelUploadRef = useRef(false);
 
   const removeStagedFile = (sid) => setStagedFiles(prev => prev.filter(f => f.id !== sid));
@@ -250,8 +253,11 @@ export default function EventDetail() {
     if (isInitial) setLoading(false);
   }, [id, user]);
 
-  useEffect(() => { 
-    if (event) setTempPassword(event.password || '');
+  useEffect(() => {
+    if (event) {
+      setTempPassword(event.password || '');
+      setSelectionLimit(event.max_selections != null ? String(event.max_selections) : '');
+    }
   }, [event]);
 
   useEffect(() => { fetchEvent(true); }, [fetchEvent]);
@@ -337,12 +343,12 @@ export default function EventDetail() {
     if (!text || !user) return;
     setSendingReply(photoId);
     await supabase.from('photo_comments').insert({
-      photo_id:    photoId,
-      event_id:    id,
+      photo_id: photoId,
+      event_id: id,
       sender_type: 'photographer',
-      sender_id:   user.id,
+      sender_id: user.id,
       sender_name: 'Photographer',
-      message:     text,
+      message: text,
     });
     setReplyDraft(prev => ({ ...prev, [photoId]: '' }));
     setSendingReply(null);
@@ -359,22 +365,22 @@ export default function EventDetail() {
     if (!allFiles.length) return;
     setStagedFiles(prev => {
       const uploadedNames = new Set(photos.map(p => p.file_name));
-      const stagedNames   = new Set(prev.map(s => s.file.name));
-      const unique        = allFiles.filter(f => !uploadedNames.has(f.name) && !stagedNames.has(f.name));
-      const dupeCount     = allFiles.length - unique.length;
+      const stagedNames = new Set(prev.map(s => s.file.name));
+      const unique = allFiles.filter(f => !uploadedNames.has(f.name) && !stagedNames.has(f.name));
+      const dupeCount = allFiles.length - unique.length;
       if (dupeCount > 0) {
         setTimeout(() => showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`), 0);
       }
       const newItems = unique.map(f => ({
-        id:         Math.random().toString(36).slice(2),
-        file:       f,
+        id: Math.random().toString(36).slice(2),
+        file: f,
         previewUrl: null,
       }));
       // Generate previews asynchronously (including RAW/PSD)
       unique.forEach((f, idx) => {
         generatePreviewUrl(f).then(url => {
           setStagedFiles(prev => prev.map(s => s.id === newItems[idx].id ? { ...s, previewUrl: url } : s));
-        }).catch(() => {});
+        }).catch(() => { });
       });
       return [...prev, ...newItems];
     });
@@ -387,12 +393,12 @@ export default function EventDetail() {
     // Storage check
     const stagedTotalSize = stagedFiles.reduce((acc, f) => acc + f.file.size, 0);
     if (storageUsed + stagedTotalSize > GLOBAL_STORAGE_LIMIT) {
-       setQuotaModal({
-         show:        true,
-         currentUsed: storageUsed,
-         trying:      stagedTotalSize
-       });
-       return;
+      setQuotaModal({
+        show: true,
+        currentUsed: storageUsed,
+        trying: stagedTotalSize
+      });
+      return;
     }
 
     cancelUploadRef.current = false;
@@ -445,20 +451,20 @@ export default function EventDetail() {
       }
 
       try {
-        const ext         = item.file.name.split('.').pop();
-        const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const folderName  = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
+        const ext = item.file.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const folderName = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
         const storagePath = `${user.id}/${folderName}/photoselection/${fileName}`;
         await uploadToR2(item.compressed, storagePath);
         const refUrl = buildR2RefUrl(storagePath);
         const { error: dbErr } = await supabase.from('photos').insert({
-          event_id:     event.id,
-          user_id:      user.id,
+          event_id: event.id,
+          user_id: user.id,
           storage_path: storagePath,
-          file_name:    item.file.name,
-          size_bytes:   item.compressed.size,
+          file_name: item.file.name,
+          size_bytes: item.compressed.size,
           supabase_url: refUrl,
-          source:       'host',
+          source: 'host',
         });
         if (dbErr) throw new Error(dbErr.message);
         const idx = remainingStash.findIndex(s => s.id === item.id);
@@ -511,15 +517,15 @@ export default function EventDetail() {
     const items = Array.from(e.dataTransfer.items ?? []);
     if (items.length && items[0].webkitGetAsEntry) {
       const entries = items.map(i => i.webkitGetAsEntry()).filter(Boolean);
-      const nested  = await Promise.all(entries.map(readEntryFiles));
+      const nested = await Promise.all(entries.map(readEntryFiles));
       stageFiles(nested.flat());
     } else {
       stageFiles(Array.from(e.dataTransfer.files));
     }
   }, [stageFiles]);
-  const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = ()  => setIsDragging(false);
-  const handleFilePick  = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
+  const handleFilePick = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
 
   const folderInputRef = useRef(null);
   const [selectedFolderName, setSelectedFolderName] = useState(null);
@@ -681,7 +687,7 @@ export default function EventDetail() {
 
   // Photo quota
   const storagePercent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
-  const quotaFull    = storageUsed >= GLOBAL_STORAGE_LIMIT;
+  const quotaFull = storageUsed >= GLOBAL_STORAGE_LIMIT;
   const quotaWarning = storagePercent >= 90 && !quotaFull;
 
   const handleSavePassword = async () => {
@@ -700,6 +706,25 @@ export default function EventDetail() {
       showToast('error', 'Update Failed', err.message);
     } finally {
       setActionLoading({ loading: false, message: '' });
+    }
+  };
+
+  const handleSaveSelectionLimit = async () => {
+    if (!event) return;
+    setSavingLimit(true);
+    const parsed = selectionLimit.trim() === '' ? null : parseInt(selectionLimit, 10);
+    try {
+      const { error } = await supabase
+        .from('events')
+        .update({ max_selections: isNaN(parsed) ? null : parsed })
+        .eq('id', id);
+      if (error) throw error;
+      showToast('success', 'Limit Updated', parsed ? `Guests can select up to ${parsed} photos.` : 'Selection limit removed.');
+      await fetchEvent();
+    } catch (err) {
+      showToast('error', 'Update Failed', err.message);
+    } finally {
+      setSavingLimit(false);
     }
   };
 
@@ -748,7 +773,7 @@ export default function EventDetail() {
         setActionLoading({ loading: true, message: `Deleting ${selectedIds.size} Photos...` });
         try {
           const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
-          
+
           const r2Paths = selectedPhotos
             .filter(p => !p.supabase_url?.includes('supabase.co'))
             .map(p => p.storage_path);
@@ -834,9 +859,9 @@ export default function EventDetail() {
 
   const handleDownloadSelected = async () => {
     const selectedPhotos = photos.filter(p => selectedIds.has(p.id));
-    
+
     showToast('success', 'Downloading...', `Starting download for ${selectedPhotos.length} photos.`);
-    
+
     for (const photo of selectedPhotos) {
       try {
         // Use signed URL for iDrive photos, supabase_url for legacy photos
@@ -882,9 +907,9 @@ export default function EventDetail() {
   const handleTogglePublic = () => {
     const next = !event.is_public;
     updateEventSetting(
-      'is_public', 
-      next, 
-      next ? 'Link Enabled' : 'Link Disabled', 
+      'is_public',
+      next,
+      next ? 'Link Enabled' : 'Link Disabled',
       next ? 'Guests can now view the gallery.' : 'Public access has been suspended.'
     );
   };
@@ -892,9 +917,9 @@ export default function EventDetail() {
   const handleToggleDownload = () => {
     const next = !event.allow_download;
     updateEventSetting(
-      'allow_download', 
-      next, 
-      next ? 'Downloads Enabled' : 'Downloads Disabled', 
+      'allow_download',
+      next,
+      next ? 'Downloads Enabled' : 'Downloads Disabled',
       next ? 'Guests can now download their selected photos.' : 'Guest downloads have been disabled.'
     );
   };
@@ -902,9 +927,9 @@ export default function EventDetail() {
   const handleToggleScreenshot = () => {
     const next = !event.allow_screenshot;
     updateEventSetting(
-      'allow_screenshot', 
-      next, 
-      next ? 'Protection Enabled' : 'Protection Disabled', 
+      'allow_screenshot',
+      next,
+      next ? 'Protection Enabled' : 'Protection Disabled',
       next ? 'Screenshot deterrents have been applied to guest view.' : 'Screenshot protection has been removed.'
     );
   };
@@ -927,7 +952,7 @@ export default function EventDetail() {
 
         {/* Back button */}
         <button
-          onClick={() => navigate(`/events/${id}`)}
+          onClick={() => navigate(`/admin/events/${id}`)}
           className="flex items-center gap-2 text-sm font-semibold text-zinc-500 hover:text-teal-700 mb-5 transition-colors group"
         >
           <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
@@ -935,15 +960,15 @@ export default function EventDetail() {
         </button>
 
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
-          <button onClick={() => navigate('/studio')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Dashboard</button>
+        <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 mb-6">
+          <button onClick={() => navigate('/admin/studio')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Dashboard</button>
           <span className="text-zinc-300 shrink-0">/</span>
-          <button onClick={() => navigate('/events')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Events</button>
+          <button onClick={() => navigate('/admin/events')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Events</button>
           <span className="text-zinc-300 shrink-0">/</span>
-          <button onClick={() => navigate(`/events/${id}`)} className="hover:text-teal-700 hover:underline transition-colors truncate max-w-[150px]">{event.name}</button>
+          <button onClick={() => navigate(`/admin/events/${id}`)} className="hover:text-teal-700 hover:underline transition-colors truncate max-w-[150px]">{event.name}</button>
           <span className="text-zinc-300 shrink-0">/</span>
           <span className="text-zinc-900 font-bold shrink-0">Photo Selection</span>
-        </nav>
+        </div>
 
         {/* Event Header */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-6">
@@ -1028,7 +1053,7 @@ export default function EventDetail() {
               </div>
 
               {/* Toggle Switch */}
-              <button 
+              <button
                 onClick={handleTogglePublic}
                 className={`w-11 h-6 rounded-full p-1 transition-all duration-300 ${event.is_public ? 'bg-teal-500' : 'bg-zinc-200'}`}
               >
@@ -1036,12 +1061,12 @@ export default function EventDetail() {
               </button>
             </div>
             <div className="flex gap-2">
-              <input 
+              <input
                 readOnly
                 value={`${window.origin}/v/${id}`}
                 className={`flex-1 bg-zinc-50 border border-zinc-100 rounded-xl px-4 py-2.5 text-xs font-mono transition-opacity ${event.is_public ? 'opacity-100 text-zinc-500' : 'opacity-40 text-zinc-400'}`}
               />
-              <button 
+              <button
                 onClick={handleCopyLink}
                 className="px-4 py-2.5 rounded-xl bg-zinc-900 text-white text-xs font-bold hover:bg-zinc-800 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-30"
               >
@@ -1062,7 +1087,7 @@ export default function EventDetail() {
                     <p className="text-[10px] text-zinc-400">Guests can download their hearted photos</p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={handleToggleDownload}
                   className={`w-10 h-5 rounded-full p-1 transition-all duration-300 ${event.allow_download ? 'bg-teal-500' : 'bg-zinc-200'}`}
                 >
@@ -1080,7 +1105,7 @@ export default function EventDetail() {
                     <p className="text-[10px] text-zinc-400">Deter guests from taking screenshots</p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={handleToggleScreenshot}
                   className={`w-10 h-5 rounded-full p-1 transition-all duration-300 ${event.allow_screenshot ? 'bg-red-500' : 'bg-zinc-200'}`}
                 >
@@ -1102,7 +1127,7 @@ export default function EventDetail() {
             </div>
             <div className="flex gap-2">
               <div className="relative flex-1">
-                <input 
+                <input
                   type="text"
                   placeholder="Set password..."
                   value={tempPassword}
@@ -1110,7 +1135,7 @@ export default function EventDetail() {
                   className="w-full bg-zinc-50 border border-zinc-100 rounded-xl px-4 py-2.5 text-xs font-bold text-zinc-700 outline-none focus:border-teal-500 transition-all"
                 />
               </div>
-              <button 
+              <button
                 onClick={handleSavePassword}
                 disabled={actionLoading.loading || tempPassword === (event.password || '')}
                 className="px-6 py-2.5 rounded-xl silk-gradient text-white text-xs font-black disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all active:scale-95 shadow-lg shadow-teal-500/10"
@@ -1121,19 +1146,78 @@ export default function EventDetail() {
           </div>
         </div>
 
+        {/* Selection Limit */}
+        <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 border border-zinc-50 mb-6">
+          <div className="flex items-start justify-between gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
+                <Heart size={16} />
+              </div>
+              <div>
+                <h3 className="font-bold text-zinc-900 text-sm">Photo Selection Limit</h3>
+                <p className="text-[10px] text-zinc-400 mt-0.5">
+                  {event.max_selections
+                    ? `Guests can heart up to ${event.max_selections} photos`
+                    : 'No limit — guests can heart unlimited photos'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Decrease */}
+              <button
+                onClick={() => setSelectionLimit(v => String(Math.max(1, (parseInt(v) || 0) - 1)))}
+                className="w-8 h-8 rounded-lg border border-zinc-200 text-zinc-600 hover:border-teal-400 hover:text-teal-600 transition-all font-bold flex items-center justify-center text-base"
+              >−</button>
+
+              <input
+                type="number"
+                min="1"
+                value={selectionLimit}
+                onChange={e => setSelectionLimit(e.target.value)}
+                placeholder="∞"
+                className="w-16 text-center bg-zinc-50 border border-zinc-200 rounded-xl px-2 py-2 text-sm font-bold text-zinc-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+
+              {/* Increase */}
+              <button
+                onClick={() => setSelectionLimit(v => String((parseInt(v) || 0) + 1))}
+                className="w-8 h-8 rounded-lg border border-zinc-200 text-zinc-600 hover:border-teal-400 hover:text-teal-600 transition-all font-bold flex items-center justify-center text-base"
+              >+</button>
+
+              <button
+                onClick={handleSaveSelectionLimit}
+                disabled={savingLimit}
+                className="px-4 py-2 rounded-xl silk-gradient text-white text-xs font-black disabled:opacity-40 hover:opacity-90 transition-all active:scale-95 shadow-lg shadow-teal-500/10"
+              >
+                {savingLimit ? <Loader2 size={13} className="animate-spin" /> : 'Save'}
+              </button>
+
+              {selectionLimit !== '' && (
+                <button
+                  onClick={() => { setSelectionLimit(''); }}
+                  className="text-[10px] text-zinc-400 hover:text-red-500 transition-colors"
+                  title="Remove limit"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Upload Zone */}
         <div
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onClick={() => !quotaFull && uploadState.phase === 'idle' && fileInputRef.current?.click()}
-          className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-200 mb-6 ${
-            quotaFull
-              ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60'
-              : isDragging
+          className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-200 mb-6 ${quotaFull
+            ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60'
+            : isDragging
               ? 'border-teal-500 bg-teal-50 scale-[1.01] cursor-pointer'
               : 'border-zinc-200 bg-white hover:border-teal-400 hover:bg-teal-50/30 cursor-pointer'
-          }`}
+            }`}
         >
           <div className="flex flex-col items-center gap-3">
             <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all ${isDragging ? 'silk-gradient' : 'bg-zinc-100'}`}>
@@ -1193,25 +1277,24 @@ export default function EventDetail() {
             <div className="flex items-center gap-2 mb-5">
               {[
                 { key: 'compressing', label: 'Compressing', color: 'amber' },
-                { key: 'uploading',   label: 'Uploading',   color: 'teal'  },
+                { key: 'uploading', label: 'Uploading', color: 'teal' },
               ].map(({ key, label, color }) => {
                 const isActive = uploadState.phase === key;
-                const isDone   = key === 'compressing' && uploadState.phase === 'uploading';
+                const isDone = key === 'compressing' && uploadState.phase === 'uploading';
                 return (
-                  <div key={key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                    isActive
-                      ? color === 'amber'
-                        ? 'bg-amber-50 border-amber-200 text-amber-700'
-                        : 'bg-teal-50 border-teal-200 text-teal-700'
-                      : isDone
+                  <div key={key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${isActive
+                    ? color === 'amber'
+                      ? 'bg-amber-50 border-amber-200 text-amber-700'
+                      : 'bg-teal-50 border-teal-200 text-teal-700'
+                    : isDone
                       ? 'bg-green-50 border-green-200 text-green-600'
                       : 'bg-zinc-50 border-zinc-200 text-zinc-400'
-                  }`}>
+                    }`}>
                     {isDone
                       ? <CheckCircle size={12} />
                       : isActive
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <div className="w-3 h-3 rounded-full border-2 border-current opacity-40" />
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <div className="w-3 h-3 rounded-full border-2 border-current opacity-40" />
                     }
                     {label}
                   </div>
@@ -1236,11 +1319,10 @@ export default function EventDetail() {
             {/* Progress bar */}
             <div className="relative h-3 rounded-full overflow-hidden bg-zinc-100 border border-zinc-200/60">
               <div
-                className={`absolute top-0 bottom-0 left-0 rounded-full transition-all duration-300 ${
-                  uploadState.phase === 'compressing'
-                    ? 'bg-gradient-to-r from-amber-400 to-orange-400'
-                    : 'silk-gradient'
-                }`}
+                className={`absolute top-0 bottom-0 left-0 rounded-full transition-all duration-300 ${uploadState.phase === 'compressing'
+                  ? 'bg-gradient-to-r from-amber-400 to-orange-400'
+                  : 'silk-gradient'
+                  }`}
                 style={{ width: `${uploadState.percent}%` }}
               />
             </div>
@@ -1377,10 +1459,10 @@ export default function EventDetail() {
 
         {/* Photo Grid Section */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7">
-          
+
           {/* Tabs */}
           <div className="flex items-center gap-6 border-b border-zinc-100 mb-8">
-            <button 
+            <button
               onClick={() => setActiveTab('all')}
               className={`pb-4 text-sm font-bold transition-all relative ${activeTab === 'all' ? 'text-teal-600' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
@@ -1415,7 +1497,7 @@ export default function EventDetail() {
                 {activeTab === 'all' ? 'Event Gallery' : 'Guest Favorites'}
               </h2>
               {showGallery && photos.length > 0 && (
-                <button 
+                <button
                   onClick={handleSelectAll}
                   className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-teal-600 transition-colors"
                 >
@@ -1424,13 +1506,13 @@ export default function EventDetail() {
                 </button>
               )}
             </div>
-            
+
             {/* Selection Actions Bar — shown when items are selected */}
             {showGallery && selectedIds.size > 0 && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
                 <span className="text-xs font-bold text-zinc-500 mr-2">{selectedIds.size} Selected</span>
                 {activeTab === 'selected' && (
-                  <button 
+                  <button
                     onClick={handleDownloadSelected}
                     className="p-2 rounded-lg bg-zinc-50 text-zinc-600 hover:bg-teal-50 hover:text-teal-600 transition-all shadow-sm"
                     title="Download Selected"
@@ -1439,7 +1521,7 @@ export default function EventDetail() {
                   </button>
                 )}
                 {activeTab === 'all' && (
-                  <button 
+                  <button
                     onClick={handleDeleteSelected}
                     disabled={actionLoading.loading}
                     className="p-2 rounded-lg bg-zinc-50 text-zinc-600 hover:bg-red-50 hover:text-red-600 transition-all shadow-sm disabled:opacity-50"
@@ -1574,74 +1656,74 @@ export default function EventDetail() {
               {photos
                 .filter(photo => activeTab === 'all' || (photo.likes_count || 0) > 0)
                 .map((photo, idx) => (
-                <div
-                  key={photo.id}
-                  className={`group relative aspect-square rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${selectedIds.has(photo.id) ? 'ring-4 ring-teal-500/20' : 'bg-zinc-100'}`}
-                >
-                  {getPhotoUrl(photo) ? (
-                    <img
-                      src={getPhotoUrl(photo)}
-                      alt={photo.file_name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center w-full h-full">
-                      <Loader2 size={20} className="animate-spin text-zinc-300" />
-                    </div>
-                  )}
-
-                  {/* Number badge — only in Guest Selections tab */}
-                  {activeTab === 'selected' && (
-                    <div className="absolute bottom-2 left-2 z-10 w-6 h-6 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center">
-                      <span className="text-[10px] font-black text-white leading-none">{idx + 1}</span>
-                    </div>
-                  )}
-
-                  {/* Pencil replace button — All tab only, top-left, shows on hover */}
-                  {activeTab === 'all' && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setReplacingPhotoId(photo.id); replaceInputRef.current?.click(); }}
-                      className="absolute top-2 left-2 z-20 w-7 h-7 rounded-lg bg-black/50 backdrop-blur-sm text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-teal-500 active:scale-95"
-                      title="Replace photo"
-                    >
-                      <Pencil size={12} />
-                    </button>
-                  )}
-
-                  {/* Heart Badge */}
-                  {(photo.likes_count || 0) > 0 && (
-                    <div className="absolute top-2 left-2 z-10 px-1.5 py-1 rounded-lg bg-white/90 backdrop-blur-md shadow-sm border border-pink-100 flex items-center gap-1 animate-in zoom-in duration-300">
-                      <Heart size={10} className="text-pink-500" fill="currentColor" />
-                      <span className="text-[10px] font-black text-pink-600">{photo.likes_count}</span>
-                    </div>
-                  )}
-                  {/* Comment Badge */}
-                  {(photoComments[photo.id]?.length || 0) > 0 && (
-                    <div className="absolute top-2 right-2 z-10 px-1.5 py-1 rounded-lg bg-white/90 backdrop-blur-md shadow-sm border border-amber-100 flex items-center gap-1 animate-in zoom-in duration-300">
-                      <MessageCircle size={10} className="text-amber-500" fill="currentColor" />
-                      <span className="text-[10px] font-black text-amber-600">{photoComments[photo.id].length}</span>
-                    </div>
-                  )}
-
-                  <div 
-                    onClick={(e) => { e.stopPropagation(); toggleSelect(photo.id); }}
-                    className={`absolute inset-0 transition-opacity duration-200 cursor-pointer ${selectedIds.has(photo.id) ? 'bg-teal-500/20 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'}`}
+                  <div
+                    key={photo.id}
+                    className={`group relative aspect-square rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 ${selectedIds.has(photo.id) ? 'ring-4 ring-teal-500/20' : 'bg-zinc-100'}`}
                   >
-                    {/* Checkbox Trigger Area */}
-                    <div className="absolute bottom-3 right-3">
-                      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedIds.has(photo.id) ? 'bg-teal-500 border-teal-500 text-white' : 'bg-white/20 border-white/40'}`}>
-                        {selectedIds.has(photo.id) && <Check size={14} />}
+                    {getPhotoUrl(photo) ? (
+                      <img
+                        src={getPhotoUrl(photo)}
+                        alt={photo.file_name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center w-full h-full">
+                        <Loader2 size={20} className="animate-spin text-zinc-300" />
+                      </div>
+                    )}
+
+                    {/* Number badge — only in Guest Selections tab */}
+                    {activeTab === 'selected' && (
+                      <div className="absolute bottom-2 left-2 z-10 w-6 h-6 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center">
+                        <span className="text-[10px] font-black text-white leading-none">{idx + 1}</span>
+                      </div>
+                    )}
+
+                    {/* Pencil replace button — All tab only, top-left, shows on hover */}
+                    {activeTab === 'all' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setReplacingPhotoId(photo.id); replaceInputRef.current?.click(); }}
+                        className="absolute top-2 left-2 z-20 w-7 h-7 rounded-lg bg-black/50 backdrop-blur-sm text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-teal-500 active:scale-95"
+                        title="Replace photo"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
+
+                    {/* Heart Badge */}
+                    {(photo.likes_count || 0) > 0 && (
+                      <div className="absolute top-2 left-2 z-10 px-1.5 py-1 rounded-lg bg-white/90 backdrop-blur-md shadow-sm border border-pink-100 flex items-center gap-1 animate-in zoom-in duration-300">
+                        <Heart size={10} className="text-pink-500" fill="currentColor" />
+                        <span className="text-[10px] font-black text-pink-600">{photo.likes_count}</span>
+                      </div>
+                    )}
+                    {/* Comment Badge */}
+                    {(photoComments[photo.id]?.length || 0) > 0 && (
+                      <div className="absolute top-2 right-2 z-10 px-1.5 py-1 rounded-lg bg-white/90 backdrop-blur-md shadow-sm border border-amber-100 flex items-center gap-1 animate-in zoom-in duration-300">
+                        <MessageCircle size={10} className="text-amber-500" fill="currentColor" />
+                        <span className="text-[10px] font-black text-amber-600">{photoComments[photo.id].length}</span>
+                      </div>
+                    )}
+
+                    <div
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(photo.id); }}
+                      className={`absolute inset-0 transition-opacity duration-200 cursor-pointer ${selectedIds.has(photo.id) ? 'bg-teal-500/20 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'}`}
+                    >
+                      {/* Checkbox Trigger Area */}
+                      <div className="absolute bottom-3 right-3">
+                        <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedIds.has(photo.id) ? 'bg-teal-500 border-teal-500 text-white' : 'bg-white/20 border-white/40'}`}>
+                          {selectedIds.has(photo.id) && <Check size={14} />}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                    <p className="text-white text-[10px] font-medium truncate">{photo.file_name}</p>
-                    <p className="text-white/60 text-[10px]">{formatBytes(photo.size_bytes)}</p>
+                    <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                      <p className="text-white text-[10px] font-medium truncate">{photo.file_name}</p>
+                      <p className="text-white/60 text-[10px]">{formatBytes(photo.size_bytes)}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>
@@ -1695,7 +1777,7 @@ export default function EventDetail() {
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
         message={confirmModal.message}
-        onConfirm={confirmModal.action || (() => {})}
+        onConfirm={confirmModal.action || (() => { })}
         onCancel={closeConfirm}
         confirmText="Delete"
       />

@@ -49,7 +49,7 @@ export default function ConfirmPassword() {
     if (error) {
       setError(error.message);
     } else {
-      navigate('/studio');
+      navigate('/admin/studio');
     }
   };
 

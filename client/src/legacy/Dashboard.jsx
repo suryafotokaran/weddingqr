@@ -20,7 +20,7 @@ export default function App() {
   return (
     <div className="text-zinc-900">
       {/* TopNavBar */}
-      <nav className="fixed top-0 z-50 w-full px-8 py-4 flex justify-between items-center bg-white/80 backdrop-blur-xl shadow-[0_12px_40px_rgba(26,28,28,0.04)]">
+      <div className="fixed top-0 z-50 w-full px-8 py-4 flex justify-between items-center bg-white/80 backdrop-blur-xl shadow-[0_12px_40px_rgba(26,28,28,0.04)]">
         <div className="flex items-center gap-12">
           <span className="text-xl font-semibold tracking-tighter text-teal-800">The Editorial Union</span>
           <div className="hidden md:flex items-center space-x-8 text-sm tracking-tight">
@@ -40,7 +40,7 @@ export default function App() {
             src="https://lh3.googleusercontent.com/aida-public/AB6AXuCH23UGYCh3iIqu6bNvZozNR2ZOeMm5HL9IysufePEH28li9iZBHjXv0qIENZ7cqnzG5JMLO-e_XFXGjM2MHsOf75vfImyWjXjdpGXAr8McX7YvPyQMzyDC7kVPTuoCm10S3KMUeXi0c62hDFSfkKLpKA0pg3VHDT7SztXaM6SQSGCUmOVJuTPSU0pxi-2NQY7a70A69wEOm_CyPGtJWFPA7WObt2yJ8v34KC4FaJeOzRsCFOl2dj4jQh2odhdpnc7MFUCNXIUcsKU7"
           />
         </div>
-      </nav>
+      </div>
 
       <div className="flex min-h-screen pt-24">
         {/* SideNavBar */}

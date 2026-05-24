@@ -66,7 +66,7 @@ export default function OtpVerify() {
     if (error) {
       setError(error.message);
     } else {
-      navigate(isRecovery ? '/confirm-password' : '/studio');
+      navigate(isRecovery ? '/confirm-password' : '/admin/studio');
     }
   };
 

@@ -135,7 +135,7 @@ export default function EventLanding() {
           await supabase.from('photos').delete().eq('event_id', id);
           const { error } = await supabase.from('events').delete().eq('id', id);
           if (error) throw error;
-          navigate('/studio');
+          navigate('/admin/studio');
         } catch (err) {
           console.error(err);
           alert('Failed to delete event: ' + err.message);
@@ -150,13 +150,13 @@ export default function EventLanding() {
       <div className="max-w-5xl mx-auto py-6">
 
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
-          <button onClick={() => navigate('/studio')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Dashboard</button>
+        <div className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
+          <button onClick={() => navigate('/admin/studio')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Dashboard</button>
           <span className="text-zinc-300 shrink-0">/</span>
-          <button onClick={() => navigate('/events')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Events</button>
+          <button onClick={() => navigate('/admin/events')} className="hover:text-teal-700 hover:underline transition-colors shrink-0">Events</button>
           <span className="text-zinc-300 shrink-0">/</span>
           <span className="text-zinc-900 font-bold truncate">{event.name}</span>
-        </nav>
+        </div>
 
         {/* Event Header — same as EventDetail */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-10">
@@ -217,7 +217,7 @@ export default function EventLanding() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Photo Selection Card */}
           <button
-            onClick={() => navigate(`/events/${id}/photos`)}
+            onClick={() => navigate(`/admin/events/${id}/photos`)}
             onMouseEnter={() => setHoveredCard('photos')}
             onMouseLeave={() => setHoveredCard(null)}
             className="group relative text-left bg-white rounded-2xl border-2 border-zinc-100 shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 hover:border-teal-300 hover:shadow-[0_20px_60px_rgba(20,184,166,0.12)] transition-all duration-300 active:scale-[0.98] overflow-hidden"
@@ -250,7 +250,7 @@ export default function EventLanding() {
 
           {/* QR Upload Card */}
           <button
-            onClick={() => navigate(`/events/${id}/qr-upload`)}
+            onClick={() => navigate(`/admin/events/${id}/qr-upload`)}
             onMouseEnter={() => setHoveredCard('qr')}
             onMouseLeave={() => setHoveredCard(null)}
             className="group relative text-left bg-white rounded-2xl border-2 border-zinc-100 shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 hover:border-violet-300 hover:shadow-[0_20px_60px_rgba(139,92,246,0.12)] transition-all duration-300 active:scale-[0.98] overflow-hidden"
@@ -286,7 +286,7 @@ export default function EventLanding() {
         {/* Website Builder Card — full width below */}
         <div className="mt-6">
           <button
-            onClick={() => navigate(`/events/${id}/website`)}
+            onClick={() => navigate(`/admin/events/${id}/website`)}
             onMouseEnter={() => setHoveredCard('website')}
             onMouseLeave={() => setHoveredCard(null)}
             className="group relative w-full text-left bg-white rounded-2xl border-2 border-zinc-100 shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-8 hover:border-rose-300 hover:shadow-[0_20px_60px_rgba(194,130,110,0.14)] transition-all duration-300 active:scale-[0.98] overflow-hidden"

@@ -101,6 +101,14 @@ export function buildR2RefUrl(storagePath) {
   return `${ENDPOINT}/${BUCKET}/${storagePath}`;
 }
 
+/**
+ * Generate a single presigned GET URL for a storage path (1-hour expiry).
+ */
+export async function getSignedUrlForPath(storagePath) {
+  const command = new GetObjectCommand({ Bucket: BUCKET, Key: storagePath });
+  return getSignedUrl(s3Client, command, { expiresIn: 3600 });
+}
+
 // ── Backward-compatible aliases (used in EventDetail / GuestEventView) ────────
 export const uploadToIDrive   = uploadToR2;
 export const deleteFromIDrive = deleteFromR2;

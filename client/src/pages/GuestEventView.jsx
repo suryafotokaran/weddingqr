@@ -74,6 +74,7 @@ export default function GuestEventView() {
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [limitWarning, setLimitWarning] = useState(false);
   const [guestId, setGuestId] = useState(() => {
     const saved = localStorage.getItem('guest_id');
     if (saved) return saved;
@@ -307,6 +308,10 @@ export default function GuestEventView() {
   const toggleFavorite = async (photoId) => {
     if (isLocked) return;
     const isAdding = !favorites.has(photoId);
+    if (isAdding && event.max_selections && favorites.size >= event.max_selections) {
+      setLimitWarning(true);
+      return;
+    }
     
     // Optimistic UI update
     setFavorites(prev => {
@@ -446,6 +451,25 @@ export default function GuestEventView() {
 
   return (
     <div className="min-h-screen bg-zinc-50">
+      {/* Limit warning modal */}
+      {limitWarning && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full text-center">
+            <div className="text-4xl mb-4">⚠️</div>
+            <h3 className="text-lg font-bold text-zinc-800 mb-2">Selection Limit Reached</h3>
+            <p className="text-zinc-500 text-sm mb-6">
+              You can only select up to <span className="font-semibold text-zinc-800">{event.max_selections}</span> photo{event.max_selections !== 1 ? 's' : ''}.
+            </p>
+            <button
+              onClick={() => setLimitWarning(false)}
+              className="bg-zinc-900 text-white rounded-xl px-8 py-2.5 text-sm font-semibold hover:bg-zinc-700 transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header and Tabs */}
       <header className="bg-white border-b border-zinc-100 sticky top-0 z-20 px-6 pt-4">
         <div className="max-w-6xl mx-auto">
@@ -506,6 +530,7 @@ export default function GuestEventView() {
               <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'favorites' ? 'bg-pink-100 text-pink-600' : 'bg-zinc-100 text-zinc-400'}`}>
                 {favorites.size}
               </div>
+              {event.max_selections ? <span className="text-[10px] text-zinc-400 font-medium">/ {event.max_selections}</span> : null}
               {activeTab === 'favorites' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full" />}
             </button>
           </div>

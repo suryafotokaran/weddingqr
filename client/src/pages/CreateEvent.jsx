@@ -35,7 +35,7 @@ export default function CreateEvent() {
       .select().single();
     setSaving(false);
     if (error) { showToast('error', 'Failed to create event', error.message); return; }
-    navigate(`/events/${data.id}`);
+    navigate(`/admin/events/${data.id}`);
   };
 
   const filled = form.name.trim() && form.date;

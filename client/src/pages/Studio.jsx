@@ -74,7 +74,7 @@ export default function Studio() {
           </p>
         </div>
         <button
-          onClick={() => navigate('/createevent')}
+          onClick={() => navigate('/admin/createevent')}
           className="group flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold shadow-md hover:bg-teal-800 active:scale-95 transition-all shrink-0"
         >
           <Plus size={15} />
@@ -129,7 +129,7 @@ export default function Studio() {
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-50">
           <h2 className="text-sm font-semibold text-zinc-900">Recent Events</h2>
           <button
-            onClick={() => navigate('/events')}
+            onClick={() => navigate('/admin/events')}
             className="flex items-center gap-1 text-[10px] font-semibold text-teal-700 tracking-widest uppercase hover:text-teal-800 transition"
           >
             View All <ChevronRight size={11} />
@@ -150,7 +150,7 @@ export default function Studio() {
             <p className="font-semibold text-zinc-700 mb-1 text-sm">No events yet</p>
             <p className="text-sm text-zinc-400 mb-5 max-w-xs">Create your first event to start collecting photos.</p>
             <button
-              onClick={() => navigate('/createevent')}
+              onClick={() => navigate('/admin/createevent')}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold shadow-md hover:bg-teal-800 active:scale-95 transition-all"
             >
               <Plus size={14} /> Create Event
@@ -161,7 +161,7 @@ export default function Studio() {
             {events.slice(0, 6).map((event, idx) => (
               <div
                 key={event.id}
-                onClick={() => navigate(`/events/${event.id}`)}
+                onClick={() => navigate(`/admin/events/${event.id}`)}
                 className={`flex items-center gap-3 px-5 py-3.5 cursor-pointer group hover:bg-teal-50/50 transition-colors ${idx !== 0 ? 'border-t border-zinc-50' : ''}`}
               >
                 <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center shrink-0 group-hover:bg-teal-100 transition-colors">

@@ -65,7 +65,8 @@ function EventSkeleton() {
           </div>
         </div>
       </div>
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
         .skeleton-shimmer { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent); animation: shimmer 1.5s infinite; }
       `}} />
@@ -92,9 +93,9 @@ function ActionOverlay({ message = 'Processing...' }) {
 
 // ── Compression options ──────────────────────────────────────────────────────
 const getCompressionOptions = (maxMb) => ({
-  maxSizeMB:        Math.min(maxMb, 2),
+  maxSizeMB: Math.min(maxMb, 2),
   maxWidthOrHeight: 3840,
-  useWebWorker:     true,
+  useWebWorker: true,
   preserveExifData: true,
 });
 
@@ -104,26 +105,26 @@ export default function QRUpload() {
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
 
-  const [event,        setEvent]        = useState(null);
-  const [photos,       setPhotos]       = useState([]);
-  const [photoCount,   setPhotoCount]   = useState(0);
-  const [storageUsed,  setStorageUsed]  = useState(0);
-  const [loading,      setLoading]      = useState(true);
-  const [copied,       setCopied]       = useState(false);
-  const [signedUrls,   setSignedUrls]   = useState({});
-  const [stagedFiles,  setStagedFiles]  = useState([]);
-  const [uploadState,  setUploadState]  = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-  const [isDragging,   setIsDragging]   = useState(false);
-  const [toast,        setToast]        = useState(null);
+  const [event, setEvent] = useState(null);
+  const [photos, setPhotos] = useState([]);
+  const [photoCount, setPhotoCount] = useState(0);
+  const [storageUsed, setStorageUsed] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [signedUrls, setSignedUrls] = useState({});
+  const [stagedFiles, setStagedFiles] = useState([]);
+  const [uploadState, setUploadState] = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+  const [isDragging, setIsDragging] = useState(false);
+  const [toast, setToast] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null, confirmText: 'Delete', isDestructive: true });
-  const [selectedIds,  setSelectedIds]  = useState(new Set());
-  const [actionLoading,setActionLoading]= useState({ loading: false, message: '' });
-  const [showGallery,  setShowGallery]  = useState(false);
-  const [quotaModal,   setQuotaModal]   = useState({ show: false, currentUsed: 0, trying: 0 });
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [actionLoading, setActionLoading] = useState({ loading: false, message: '' });
+  const [showGallery, setShowGallery] = useState(false);
+  const [quotaModal, setQuotaModal] = useState({ show: false, currentUsed: 0, trying: 0 });
 
-  const fileInputRef      = useRef(null);
-  const folderInputRef    = useRef(null);
-  const cancelUploadRef   = useRef(false);
+  const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
+  const cancelUploadRef = useRef(false);
   const [selectedFolderName, setSelectedFolderName] = useState(null);
 
   const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
@@ -137,7 +138,7 @@ export default function QRUpload() {
           if (entry.kind === 'file') {
             const file = await entry.getFile();
             // Accept all files (including raw formats)
-        files.push(file);
+            files.push(file);
           }
         }
         if (files.length) {
@@ -200,7 +201,7 @@ export default function QRUpload() {
     setPhotoCount(countRes.data ?? 0);
     const totalSize = (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
     setStorageUsed(totalSize);
-    
+
     setLoading(false);
   }, [id, user]);
 
@@ -222,20 +223,20 @@ export default function QRUpload() {
         ...prev.map(s => s.file.name),
       ]);
       const uniqueFiles = validFiles.filter(f => !existingNames.has(f.name));
-      const dupeCount   = validFiles.length - uniqueFiles.length;
+      const dupeCount = validFiles.length - uniqueFiles.length;
       if (dupeCount > 0) {
         setTimeout(() => showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`), 0);
       }
       const newItems = uniqueFiles.map(f => ({
-        id:         Math.random().toString(36).slice(2),
-        file:       f,
+        id: Math.random().toString(36).slice(2),
+        file: f,
         previewUrl: null,
       }));
       // Generate previews asynchronously (including RAW/PSD)
       uniqueFiles.forEach((f, idx) => {
         generatePreviewUrl(f).then(url => {
           setStagedFiles(prev => prev.map(s => s.id === newItems[idx].id ? { ...s, previewUrl: url } : s));
-        }).catch(() => {});
+        }).catch(() => { });
       });
       return [...prev, ...newItems];
     });
@@ -305,31 +306,31 @@ export default function QRUpload() {
 
       try {
         // 1. Upload compressed image → Cloudflare R2
-        const ext         = item.file.name.split('.').pop();
-        const fileName    = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-        const folderName  = (event.name || event.id).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        const ext = item.file.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const folderName = (event.name || event.id).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
         const storagePath = `${user.id}/${folderName}/qrupload/${fileName}`;
         await uploadToR2(item.compressed, storagePath);
 
         // 2. Insert photo row → Supabase
         const { data: insertedPhoto, error: dbErr } = await supabase.from('photos').insert({
-          event_id:     event.id,
-          user_id:      user.id,
+          event_id: event.id,
+          user_id: user.id,
           storage_path: storagePath,
-          file_name:    item.file.name,
-          size_bytes:   item.compressed.size,
+          file_name: item.file.name,
+          size_bytes: item.compressed.size,
           supabase_url: buildR2RefUrl(storagePath),
-          source:       'qr_gallery',
+          source: 'qr_gallery',
         }).select('id').single();
         if (dbErr) throw new Error(dbErr.message);
 
         // 3. Extract face vectors from ORIGINAL full-res file → store in face_embeddings
         try {
-          const img        = await faceapi.bufferToImage(item.file);
+          const img = await faceapi.bufferToImage(item.file);
           const detections = await extractMultipleEmbeddings(img);
           if (detections?.length > 0) {
             const embeds = detections.map(det => ({
-              photo_id:  insertedPhoto.id,
+              photo_id: insertedPhoto.id,
               embedding: `[${Array.from(det.descriptor).join(',')}]`,
             }));
             const { error: embedErr } = await supabase.from('face_embeddings').insert(embeds);
@@ -363,14 +364,14 @@ export default function QRUpload() {
     }
   };
 
-  const handleDrop      = useCallback((e) => { e.preventDefault(); setIsDragging(false); stageFiles(Array.from(e.dataTransfer.files)); }, [stageFiles]);
-  const handleDragOver  = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDrop = useCallback((e) => { e.preventDefault(); setIsDragging(false); stageFiles(Array.from(e.dataTransfer.files)); }, [stageFiles]);
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = () => setIsDragging(false);
-  const handleFilePick  = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
+  const handleFilePick = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
 
   // Quota info
   const storagePercent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
-  const quotaFull    = storageUsed >= GLOBAL_STORAGE_LIMIT;
+  const quotaFull = storageUsed >= GLOBAL_STORAGE_LIMIT;
   const quotaWarning = storagePercent >= 90 && !quotaFull;
 
   /* ── Event Settings ── */
@@ -389,8 +390,8 @@ export default function QRUpload() {
     }
   };
 
-  const handleToggleLive       = () => updateEventSetting('is_qr_live', !event.is_qr_live, event.is_qr_live ? 'QR Disabled' : 'QR Enabled', event.is_qr_live ? 'Gallery hidden.' : 'Guests can now view the gallery.');
-  const handleToggleDownload   = () => updateEventSetting('allow_download', !event.allow_download, 'Downloads Updated', '');
+  const handleToggleLive = () => updateEventSetting('is_qr_live', !event.is_qr_live, event.is_qr_live ? 'QR Disabled' : 'QR Enabled', event.is_qr_live ? 'Gallery hidden.' : 'Guests can now view the gallery.');
+  const handleToggleDownload = () => updateEventSetting('allow_download', !event.allow_download, 'Downloads Updated', '');
   const handleToggleScreenshot = () => updateEventSetting('allow_screenshot', !event.allow_screenshot, 'Screenshot Protection Updated', '');
 
   /* ── Copy QR ── */
@@ -423,7 +424,7 @@ export default function QRUpload() {
   };
 
   /* ── Selection ── */
-  const toggleSelect   = (photoId) => setSelectedIds(prev => { const n = new Set(prev); n.has(photoId) ? n.delete(photoId) : n.add(photoId); return n; });
+  const toggleSelect = (photoId) => setSelectedIds(prev => { const n = new Set(prev); n.has(photoId) ? n.delete(photoId) : n.add(photoId); return n; });
   const handleSelectAll = () => {
     const allSel = photos.every(p => selectedIds.has(p.id));
     setSelectedIds(allSel ? new Set() : new Set(photos.map(p => p.id)));
@@ -467,7 +468,7 @@ export default function QRUpload() {
 
         {/* Back button */}
         <button
-          onClick={() => navigate(`/events/${id}`)}
+          onClick={() => navigate(`/admin/events/${id}`)}
           className="flex items-center gap-2 text-sm font-semibold text-zinc-500 hover:text-violet-700 mb-5 transition-colors group"
         >
           <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
@@ -475,15 +476,15 @@ export default function QRUpload() {
         </button>
 
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
-          <button onClick={() => navigate('/studio')} className="hover:text-violet-700 hover:underline transition-colors shrink-0">Dashboard</button>
+        <div className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">
+          <button onClick={() => navigate('/admin/studio')} className="hover:text-violet-700 hover:underline transition-colors shrink-0">Dashboard</button>
           <span className="text-zinc-300 shrink-0">/</span>
-          <button onClick={() => navigate('/events')} className="hover:text-violet-700 hover:underline transition-colors shrink-0">Events</button>
+          <button onClick={() => navigate('/admin/events')} className="hover:text-violet-700 hover:underline transition-colors shrink-0">Events</button>
           <span className="text-zinc-300 shrink-0">/</span>
-          <button onClick={() => navigate(`/events/${id}`)} className="hover:text-violet-700 hover:underline transition-colors truncate max-w-[150px]">{event.name}</button>
+          <button onClick={() => navigate(`/admin/events/${id}`)} className="hover:text-violet-700 hover:underline transition-colors truncate max-w-[150px]">{event.name}</button>
           <span className="text-zinc-300 shrink-0">/</span>
           <span className="text-zinc-900 font-bold shrink-0">QR Management</span>
-        </nav>
+        </div>
 
         {/* Page Header */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7 mb-6 border border-zinc-50">
@@ -731,13 +732,12 @@ export default function QRUpload() {
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onClick={() => !quotaFull && uploadState.phase === 'idle' && fileInputRef.current?.click()}
-          className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-200 mb-6 ${
-            quotaFull
+          className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-200 mb-6 ${quotaFull
               ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60'
               : isDragging
-              ? 'border-violet-500 bg-violet-50 scale-[1.01] cursor-pointer'
-              : 'border-zinc-200 bg-white hover:border-violet-400 hover:bg-violet-50/30 cursor-pointer'
-          }`}
+                ? 'border-violet-500 bg-violet-50 scale-[1.01] cursor-pointer'
+                : 'border-zinc-200 bg-white hover:border-violet-400 hover:bg-violet-50/30 cursor-pointer'
+            }`}
         >
           <div className="flex flex-col items-center gap-3">
             <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all ${isDragging ? 'bg-gradient-to-br from-violet-500 to-violet-600' : 'bg-zinc-100'}`}>
@@ -790,25 +790,24 @@ export default function QRUpload() {
             <div className="flex items-center gap-2 mb-5">
               {[
                 { key: 'compressing', label: 'Compressing', color: 'amber' },
-                { key: 'uploading',   label: 'Uploading',   color: 'violet' },
+                { key: 'uploading', label: 'Uploading', color: 'violet' },
               ].map(({ key, label, color }) => {
                 const isActive = uploadState.phase === key;
-                const isDone   = key === 'compressing' && uploadState.phase === 'uploading';
+                const isDone = key === 'compressing' && uploadState.phase === 'uploading';
                 return (
-                  <div key={key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                    isActive
+                  <div key={key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${isActive
                       ? color === 'amber'
                         ? 'bg-amber-50 border-amber-200 text-amber-700'
                         : 'bg-violet-50 border-violet-200 text-violet-700'
                       : isDone
-                      ? 'bg-green-50 border-green-200 text-green-600'
-                      : 'bg-zinc-50 border-zinc-200 text-zinc-400'
-                  }`}>
+                        ? 'bg-green-50 border-green-200 text-green-600'
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-400'
+                    }`}>
                     {isDone
                       ? <CheckCircle size={12} />
                       : isActive
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <div className="w-3 h-3 rounded-full border-2 border-current opacity-40" />
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <div className="w-3 h-3 rounded-full border-2 border-current opacity-40" />
                     }
                     {label}
                   </div>
@@ -832,11 +831,10 @@ export default function QRUpload() {
             {/* Progress bar */}
             <div className="relative h-3 rounded-full overflow-hidden bg-zinc-100 border border-zinc-200/60">
               <div
-                className={`absolute top-0 bottom-0 left-0 rounded-full transition-all duration-300 ${
-                  uploadState.phase === 'compressing'
+                className={`absolute top-0 bottom-0 left-0 rounded-full transition-all duration-300 ${uploadState.phase === 'compressing'
                     ? 'bg-gradient-to-r from-amber-400 to-orange-400'
                     : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
-                }`}
+                  }`}
                 style={{ width: `${uploadState.percent}%` }}
               />
             </div>
