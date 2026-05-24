@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { User, Building2, Mail, KeyRound, Loader2, LogOut } from 'lucide-react';
+import { User, Building2, Mail, KeyRound, Loader2, LogOut, HardDrive } from 'lucide-react';
 import DashboardLayout from '../components/DashboardLayout';
 
 export default function Profile() {
@@ -11,6 +11,12 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // storage: null = never saved before, number = saved value
+  const [storageLimitGb, setStorageLimitGb] = useState('10');
+  const [savedStorageLimitGb, setSavedStorageLimitGb] = useState(null);
+  const [savingStorage, setSavingStorage] = useState(false);
+  const [storageSuccess, setStorageSuccess] = useState('');
 
   useEffect(() => {
     fetchProfile();
@@ -25,6 +31,14 @@ export default function Profile() {
         studioName: user.user_metadata?.studio_name || '',
         email: user.email || '',
       });
+      const saved = user.user_metadata?.storage_limit_gb;
+      if (saved != null) {
+        setStorageLimitGb(String(saved));
+        setSavedStorageLimitGb(saved);
+      } else {
+        setStorageLimitGb('10');
+        setSavedStorageLimitGb(null);
+      }
     }
     setLoading(false);
   };
@@ -34,21 +48,35 @@ export default function Profile() {
     setSaving(true);
     setError('');
     setSuccess('');
-
     const { error } = await supabase.auth.updateUser({
-      data: {
-        full_name: form.name,
-        studio_name: form.studioName,
-      }
+      data: { full_name: form.name, studio_name: form.studioName },
     });
-
-    if (error) {
-      setError(error.message);
-    } else {
-      setSuccess('Profile updated successfully.');
-    }
+    if (error) setError(error.message);
+    else setSuccess('Profile updated successfully.');
     setSaving(false);
   };
+
+  const handleSaveStorage = async () => {
+    const gb = parseFloat(storageLimitGb);
+    if (!gb || gb < 10) return;
+    if (savedStorageLimitGb !== null && gb <= savedStorageLimitGb) return;
+    setSavingStorage(true);
+    setStorageSuccess('');
+    const { error } = await supabase.auth.updateUser({ data: { storage_limit_gb: gb } });
+    setSavingStorage(false);
+    if (!error) {
+      setSavedStorageLimitGb(gb);
+      setStorageSuccess(`Storage limit updated to ${gb} GB.`);
+      setTimeout(() => setStorageSuccess(''), 3000);
+    }
+  };
+
+  // Button is enabled when: value >= 10 AND (never saved OR value > saved)
+  const storageGb = parseFloat(storageLimitGb);
+  const canSaveStorage =
+    !isNaN(storageGb) &&
+    storageGb >= 10 &&
+    (savedStorageLimitGb === null || storageGb > savedStorageLimitGb);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -156,14 +184,11 @@ export default function Profile() {
                       <LogOut size={16} /> Sign Out
                     </button>
                   </div>
-
                   <button
                     type="submit"
                     disabled={saving}
                     className={`w-full sm:w-auto px-8 py-3 rounded-xl font-bold text-sm shadow-lg transition-all duration-200 active:scale-[0.98] ${
-                      saving 
-                        ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed' 
-                        : 'silk-gradient text-white hover:opacity-90'
+                      saving ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed' : 'silk-gradient text-white hover:opacity-90'
                     }`}
                   >
                     {saving ? 'Saving...' : 'Save Changes'}
@@ -172,6 +197,51 @@ export default function Profile() {
               </form>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Storage Settings Card */}
+      <div className="bg-white rounded-3xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] overflow-hidden mt-6">
+        <div className="px-8 py-8 border-b border-zinc-100 flex items-center gap-3">
+          <HardDrive size={20} className="text-violet-500" />
+          <div>
+            <h2 className="text-xl font-extrabold tracking-tight text-zinc-900">Storage Settings</h2>
+            <p className="text-zinc-500 text-sm font-medium">Set the maximum storage allowed for all uploads.</p>
+          </div>
+        </div>
+        <div className="p-8">
+          {storageSuccess && (
+            <div className="p-3 bg-teal-50 text-teal-700 text-sm font-medium rounded-xl border border-teal-100 mb-5">
+              {storageSuccess}
+            </div>
+          )}
+          <label className="flex flex-col gap-1.5 mb-5">
+            <span className="text-xs font-bold text-zinc-500 tracking-wide uppercase">Max Storage Limit (GB)</span>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min="1"
+                value={storageLimitGb}
+                onChange={(e) => setStorageLimitGb(e.target.value)}
+                className="w-36 px-4 py-3 rounded-xl border border-zinc-200 bg-white text-zinc-900 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+              />
+              <span className="text-sm font-semibold text-zinc-400">GB</span>
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              Minimum 10 GB. You can only increase this limit, not reduce it.
+            </p>
+          </label>
+          <button
+            onClick={handleSaveStorage}
+            disabled={!canSaveStorage || savingStorage}
+            className={`px-8 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
+              !canSaveStorage || savingStorage
+                ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
+                : 'bg-violet-600 hover:bg-violet-700 text-white'
+            }`}
+          >
+            {savingStorage ? 'Saving...' : 'Save Limit'}
+          </button>
         </div>
       </div>
     </DashboardLayout>

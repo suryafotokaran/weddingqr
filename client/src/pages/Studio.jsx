@@ -27,7 +27,7 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
+const GB = 1024 * 1024 * 1024;
 
 export default function Studio() {
   const navigate = useNavigate();
@@ -56,6 +56,8 @@ export default function Studio() {
     })();
   }, [userData]);
 
+  const storageLimitGb = userData?.user?.user_metadata?.storage_limit_gb ?? 10;
+  const GLOBAL_STORAGE_LIMIT = storageLimitGb * GB;
   const storagePercent = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
   const firstName = fullName.split(' ')[0];
 
@@ -110,7 +112,7 @@ export default function Studio() {
         </div>
         <div className="flex-1">
           <div className="flex items-center justify-between mb-1.5">
-            <p className="text-sm font-medium text-zinc-600">{formatBytes(storageUsed)} <span className="text-zinc-400">/ 10 GB</span></p>
+            <p className="text-sm font-medium text-zinc-600">{formatBytes(storageUsed)} <span className="text-zinc-400">/ {storageLimitGb} GB</span></p>
             <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${storagePercent > 90 ? 'bg-red-50 text-red-600' : 'bg-teal-50 text-teal-700'}`}>
               {storagePercent.toFixed(1)}%
             </span>

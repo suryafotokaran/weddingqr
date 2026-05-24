@@ -127,7 +127,7 @@ export default function QRUpload() {
   const cancelUploadRef = useRef(false);
   const [selectedFolderName, setSelectedFolderName] = useState(null);
 
-  const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
+  const GLOBAL_STORAGE_LIMIT = ((user?.user_metadata?.storage_limit_gb ?? 10) * 1024 * 1024 * 1024);
 
   const handleFolderPick = async () => {
     if ('showDirectoryPicker' in window) {
@@ -248,12 +248,6 @@ export default function QRUpload() {
   const startUpload = async () => {
     if (!stagedFiles.length || !user || !event) return;
 
-    const stagedTotalSize = stagedFiles.reduce((acc, f) => acc + f.file.size, 0);
-    if (storageUsed + stagedTotalSize > GLOBAL_STORAGE_LIMIT) {
-      setQuotaModal({ show: true, currentUsed: storageUsed, trying: stagedTotalSize });
-      return;
-    }
-
     cancelUploadRef.current = false;
     let cancelled = false;
 
@@ -286,6 +280,14 @@ export default function QRUpload() {
       return;
     }
 
+    // ── Check quota using ACTUAL compressed size ──────────────────────────────
+    const compressedTotalSize = compressedItems.reduce((acc, item) => acc + item.compressed.size, 0);
+    if (storageUsed + compressedTotalSize > GLOBAL_STORAGE_LIMIT) {
+      setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+      setQuotaModal({ show: true, currentUsed: storageUsed, trying: compressedTotalSize });
+      return;
+    }
+
     // ── Phase 2 & 3: Upload + Store Embeddings ────────────────────────────────
     const remainingStash = [...stagedFiles];
     let uploaded = 0;
@@ -294,10 +296,6 @@ export default function QRUpload() {
       if (cancelUploadRef.current) { cancelled = true; break; }
       const item = compressedItems[i];
       setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round((i / compressedItems.length) * 100), message: item.file.name });
-
-      if (storageUsed + item.compressed.size > GLOBAL_STORAGE_LIMIT) {
-        showToast('error', 'Storage Full', 'Global storage limit of 10GB reached.'); break;
-      }
       if (photos.some(p => p.file_name === item.file.name)) {
         const idx = remainingStash.findIndex(s => s.id === item.id);
         if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
@@ -519,7 +517,7 @@ export default function QRUpload() {
                 </div>
                 <div className="flex items-baseline gap-1">
                   <p className="text-lg font-bold text-zinc-900">{formatBytes(storageUsed)}</p>
-                  <p className="text-[11px] font-semibold text-zinc-400">/ 10 GB</p>
+                  <p className="text-[11px] font-semibold text-zinc-400">/ {user?.user_metadata?.storage_limit_gb ?? 10} GB</p>
                 </div>
                 <p className="text-[10px] text-zinc-400 leading-tight">across all events</p>
                 <div className="mt-1.5 h-1 bg-zinc-200 rounded-full overflow-hidden">
@@ -989,10 +987,10 @@ export default function QRUpload() {
             </div>
             <h2 className="text-lg font-black text-zinc-900 text-center mb-3">Global Storage Full</h2>
             <p className="text-sm text-zinc-500 text-center mb-1">
-              Your global storage limit of 10 GB has been reached.
+              Not enough storage to complete this upload.
             </p>
             <p className="text-sm text-zinc-500 text-center mb-6">
-              You are trying to upload <span className="font-bold text-zinc-800">{formatBytes(quotaModal.trying)}</span>, but only <span className="font-bold text-teal-600">{formatBytes(Math.max(0, GLOBAL_STORAGE_LIMIT - quotaModal.currentUsed))}</span> is remaining.
+              After compression, these photos are <span className="font-bold text-zinc-800">{formatBytes(quotaModal.trying)}</span>, but only <span className="font-bold text-teal-600">{formatBytes(Math.max(0, GLOBAL_STORAGE_LIMIT - quotaModal.currentUsed))}</span> remains. Delete photos from other events to free up space.
             </p>
             <button
               onClick={() => setQuotaModal(m => ({ ...m, show: false }))}
