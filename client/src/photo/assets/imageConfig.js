@@ -1,4 +1,4 @@
-import logo from "./ui/logo.jpg";
+import logo from "./ui/fotokaran-logo.png";
 import whatsappImage from "./ui/whatsapp.webp";
 import instagramImage from "./ui/instagram.webp";
 import mapbutton from "./ui/mapbutton.svg";

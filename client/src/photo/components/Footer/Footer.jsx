@@ -7,11 +7,11 @@ const Footer = () => {
   const footer = siteContent.footer  || {};
   const social = siteContent.social  || {};
 
-  const businessName  = footer.business_name || "Film Factory Studios";
-  const stayInTouch   = footer.stay_in_touch || "Keep up-to-date with all things Capturer! Join our community and never miss a moment!";
-  const copyright     = footer.copyright     || "Copyright © 2025 Film Factory Studios. All rights reserved.";
-  const facebookUrl   = social.facebook      || "https://www.facebook.com/p/Film-Factory-Studios-100092703673146/";
-  const instagramUrl  = social.instagram     || "https://www.instagram.com/filmfactory_studios/";
+  const businessName  = footer.business_name || "Fotokaran Studio";
+  const stayInTouch   = footer.stay_in_touch || "Keep up-to-date with all things Fotokaran! Join our community and never miss a moment!";
+  const copyright     = footer.copyright     || "Copyright © 2025 Fotokaran Studio. All rights reserved.";
+  const facebookUrl   = social.facebook      || "#";
+  const instagramUrl  = social.instagram     || "#";
 
   return (
     <footer>

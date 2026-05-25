@@ -18,7 +18,7 @@ const Services = () => {
           ~ SERVICES ~
         </h2>
         <p className="text-neutral-400 leading-7 text-center max-w-[600px] mx-auto">
-          At Film Factory Studios, we offer a range of professional photography services tailored to meet your unique needs.
+          At Fotokaran Studio, we offer a range of professional photography services tailored to meet your unique needs.
         </p>
         <div className="mt-16 grid gap-8 sm:grid-cols-2 md:grid-cols-3">
           {services.map((s) => (

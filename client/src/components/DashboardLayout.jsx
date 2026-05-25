@@ -53,7 +53,7 @@ export default function DashboardLayout({ children }) {
       {/* TopNavBar */}
       <div className="fixed top-0 z-50 w-full px-8 py-4 flex justify-between items-center bg-white/80 backdrop-blur-xl shadow-[0_12px_40px_rgba(26,28,28,0.04)]">
         <div className="flex items-center gap-12">
-          <span className="text-xl font-semibold tracking-tighter text-teal-800">{studioName}</span>
+          <img src="/fotokaran-logo.png" alt="Fotokaran Studio" className="h-9 w-9 rounded-lg object-cover bg-zinc-900" />
           <div className="hidden md:flex items-center space-x-8 text-sm tracking-tight">
             <button onClick={() => navigate('/admin/studio')} className={`font-bold transition-colors ${location.pathname === '/admin/studio' ? 'text-teal-700 border-b-2 border-teal-600' : 'text-zinc-500 hover:text-teal-600'}`}>Dashboard</button>
             <a className="text-zinc-500 font-medium hover:text-teal-600 transition-colors" href="#">Galleries</a>
@@ -77,9 +77,9 @@ export default function DashboardLayout({ children }) {
               className="flex items-center focus:outline-none"
             >
               <img
-                alt="Photographer Profile"
-                className="w-10 h-10 rounded-full object-cover ring-2 ring-transparent hover:ring-teal-500 transition-all cursor-pointer"
-                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&background=0D8B4E&color=fff`}
+                alt="Fotokaran Studio"
+                className="w-10 h-10 rounded-full object-cover ring-2 ring-transparent hover:ring-teal-500 transition-all cursor-pointer bg-zinc-900"
+                src="/fotokaran-logo.png"
               />
             </button>
 

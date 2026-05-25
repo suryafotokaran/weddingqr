@@ -19,7 +19,7 @@ const FloatingButtons = () => {
 
   const handleInstagramClick = () => {
     window.open(
-      "https://www.instagram.com/filmfactory_studios/?igsh=MWY5NHNzZHE5MXhoaw%3D%3D&utm_source=qr#",
+      "#",
       "_blank"
     );
   };

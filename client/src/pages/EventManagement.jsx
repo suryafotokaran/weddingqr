@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { Document, Page, Text, View, Image, StyleSheet, pdf } from '@react-pdf/renderer';
 import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
@@ -6,7 +7,7 @@ import {
   Users, Plus, Search, Edit2, Trash2, X, ChevronDown,
   IndianRupee, Camera, Package, CreditCard, Truck, FileText,
   Phone, Mail, MapPin, Calendar, Clock, CheckSquare, Square,
-  Loader2, Briefcase, BookOpen,
+  Loader2, Briefcase, BookOpen, FileCheck2, Printer,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -35,16 +36,16 @@ const EVENT_TYPE_LABELS = {
 };
 
 const EVENT_TYPE_COLORS = {
-  wedding:    'bg-teal-100 text-teal-800',
+  wedding: 'bg-teal-100 text-teal-800',
   engagement: 'bg-rose-100 text-rose-800',
-  birthday:   'bg-violet-100 text-violet-800',
-  reception:  'bg-orange-100 text-orange-800',
-  baby_shower:'bg-pink-100 text-pink-800',
+  birthday: 'bg-violet-100 text-violet-800',
+  reception: 'bg-orange-100 text-orange-800',
+  baby_shower: 'bg-pink-100 text-pink-800',
 };
 
 const STATUS_COLORS = {
-  pending:   'bg-amber-100 text-amber-800',
-  editing:   'bg-blue-100 text-blue-800',
+  pending: 'bg-amber-100 text-amber-800',
+  editing: 'bg-blue-100 text-blue-800',
   delivered: 'bg-green-100 text-green-800',
 };
 
@@ -120,15 +121,456 @@ function Segmented({ options, value, onChange }) {
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`flex-1 py-2 font-medium transition-colors ${
-            value === opt.value
+          className={`flex-1 py-2 font-medium transition-colors ${value === opt.value
               ? 'bg-teal-600 text-white'
               : 'bg-white text-zinc-600 hover:bg-zinc-50'
-          }`}
+            }`}
         >
           {opt.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Invoice number generator
+// ---------------------------------------------------------------------------
+function invoiceNumber(record) {
+  const d = new Date(record.created_at);
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const short = record.id.replace(/-/g, '').slice(0, 6).toUpperCase();
+  return `FS-${yy}${mm}-${short}`;
+}
+
+// ---------------------------------------------------------------------------
+// react-pdf styles
+// ---------------------------------------------------------------------------
+const pdfStyles = StyleSheet.create({
+  page:        { fontFamily: 'Helvetica', padding: 40, backgroundColor: '#ffffff', fontSize: 10, color: '#1a1a1a' },
+  header:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#e5e5e5' },
+  logo:        { width: 80, height: 80, borderRadius: 8 },
+  invoiceTitle:{ fontSize: 28, fontFamily: 'Helvetica-Bold', color: '#00685f', letterSpacing: 3, marginBottom: 6 },
+  metaLabel:   { fontSize: 7, color: '#999', marginBottom: 2 },
+  metaValue:   { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', marginBottom: 6 },
+  studioName:  { fontSize: 8, color: '#888', marginTop: 6 },
+  section2col: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  colHalf:     { width: '47%' },
+  sectionLabel:{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#00685f', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6 },
+  clientName:  { fontSize: 13, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', marginBottom: 3 },
+  clientSub:   { fontSize: 9, color: '#444', marginBottom: 2 },
+  clientMeta:  { fontSize: 8, color: '#888', marginBottom: 2 },
+  evRow:       { flexDirection: 'row', marginBottom: 4 },
+  evLabel:     { fontSize: 8, color: '#999', width: 55 },
+  evValue:     { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', flex: 1 },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#f8f8f8', paddingVertical: 6, paddingHorizontal: 8, marginBottom: 4 },
+  thText:      { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#999', textTransform: 'uppercase', letterSpacing: 1 },
+  tableRow:    { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  tdPkg:       { width: '28%', fontSize: 10, fontFamily: 'Helvetica-Bold', color: '#1a1a1a' },
+  tdDetails:   { flex: 1 },
+  tdAmount:    { width: '20%', fontSize: 10, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', textAlign: 'right' },
+  tagWrap:     { flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginBottom: 4 },
+  tag:         { backgroundColor: '#f0faf9', borderWidth: 1, borderColor: '#b2e4df', borderRadius: 10, paddingVertical: 2, paddingHorizontal: 6, fontSize: 7, color: '#00685f' },
+  deliverTxt:  { fontSize: 7.5, color: '#999', marginTop: 2 },
+  summaryWrap: { alignItems: 'flex-end', marginTop: 8, marginBottom: 16 },
+  summaryBox:  { width: '45%' },
+  summaryRow:  { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
+  summaryLabel:{ fontSize: 9, color: '#888' },
+  summaryVal:  { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1a1a1a' },
+  divider:     { borderBottomWidth: 1, borderBottomColor: '#ddd', marginVertical: 3 },
+  balanceRow:  { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
+  balanceLabel:{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: '#1a1a1a' },
+  deliveryBox: { backgroundColor: '#fafafa', borderWidth: 1, borderColor: '#eee', borderRadius: 6, padding: 10, flexDirection: 'row', gap: 30, marginBottom: 12 },
+  deliveryLbl: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#999', marginBottom: 3, textTransform: 'uppercase', letterSpacing: 1 },
+  notesBox:    { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 6, padding: 10, marginBottom: 12 },
+  notesLbl:    { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#b45309', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 },
+  notesText:   { fontSize: 8.5, color: '#444', lineHeight: 1.5 },
+  footer:      { borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10, marginTop: 10, textAlign: 'center', fontSize: 8, color: '#ccc' },
+});
+
+// ---------------------------------------------------------------------------
+// react-pdf Document component
+// ---------------------------------------------------------------------------
+function InvoicePDFDoc({ record, studioName }) {
+  const finalAmount = toNum(record.total_amount) - toNum(record.discount);
+  const balance = finalAmount - toNum(record.advance_paid);
+  const invoiceDate = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+  const invNo = invoiceNumber(record);
+  const balanceColor = balance > 0 ? '#dc2626' : '#16a34a';
+  const statusColor = record.delivery_status === 'delivered' ? '#16a34a' : record.delivery_status === 'editing' ? '#2563eb' : '#d97706';
+
+  return (
+    <Document>
+      <Page size="A4" style={pdfStyles.page}>
+
+        {/* Header */}
+        <View style={pdfStyles.header}>
+          <View>
+            <Image src="/fotokaran-logo.png" style={pdfStyles.logo} />
+            <Text style={pdfStyles.studioName}>{studioName}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={pdfStyles.invoiceTitle}>INVOICE</Text>
+            <Text style={pdfStyles.metaLabel}>Invoice No.</Text>
+            <Text style={pdfStyles.metaValue}>{invNo}</Text>
+            <Text style={pdfStyles.metaLabel}>Date</Text>
+            <Text style={pdfStyles.metaValue}>{invoiceDate}</Text>
+          </View>
+        </View>
+
+        {/* Bill To + Event Details */}
+        <View style={pdfStyles.section2col}>
+          <View style={pdfStyles.colHalf}>
+            <Text style={pdfStyles.sectionLabel}>Bill To</Text>
+            <Text style={pdfStyles.clientName}>{record.client_name}</Text>
+            {(record.bride_name || record.groom_name) && (
+              <Text style={pdfStyles.clientSub}>{[record.bride_name, record.groom_name].filter(Boolean).join(' & ')}</Text>
+            )}
+            {record.phone   && <Text style={pdfStyles.clientMeta}>{record.phone}</Text>}
+            {record.email   && <Text style={pdfStyles.clientMeta}>{record.email}</Text>}
+            {record.address && <Text style={pdfStyles.clientMeta}>{record.address}</Text>}
+          </View>
+          <View style={pdfStyles.colHalf}>
+            <Text style={pdfStyles.sectionLabel}>Event Details</Text>
+            {[
+              ['Type',     EVENT_TYPE_LABELS[record.event_type] || record.event_type],
+              record.event_date     && ['Date',     formatDate(record.event_date)],
+              record.event_location && ['Venue',    record.event_location],
+              record.shoot_duration && ['Duration', record.shoot_duration],
+            ].filter(Boolean).map(([lbl, val]) => (
+              <View key={lbl} style={pdfStyles.evRow}>
+                <Text style={pdfStyles.evLabel}>{lbl}</Text>
+                <Text style={pdfStyles.evValue}>{String(val)}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* Services Table */}
+        <View style={pdfStyles.tableHeader}>
+          <Text style={[pdfStyles.thText, { width: '28%' }]}>Description</Text>
+          <Text style={[pdfStyles.thText, { flex: 1 }]}>Details</Text>
+          <Text style={[pdfStyles.thText, { width: '20%', textAlign: 'right' }]}>Amount</Text>
+        </View>
+        <View style={pdfStyles.tableRow}>
+          <Text style={pdfStyles.tdPkg}>{record.package_name || 'Photography Package'}</Text>
+          <View style={pdfStyles.tdDetails}>
+            {(record.services || []).length > 0 && (
+              <View style={pdfStyles.tagWrap}>
+                {(record.services || []).map(s => (
+                  <View key={s} style={pdfStyles.tag}><Text>{s}</Text></View>
+                ))}
+              </View>
+            )}
+            {[
+              record.promised_photos > 0        && `${record.promised_photos} photos`,
+              record.promised_video_duration     && `${record.promised_video_duration} video`,
+              record.album_count > 0             && `${record.album_count} album${record.album_count !== 1 ? 's' : ''}`,
+            ].filter(Boolean).length > 0 && (
+              <Text style={pdfStyles.deliverTxt}>
+                {[
+                  record.promised_photos > 0    && `${record.promised_photos} photos`,
+                  record.promised_video_duration && `${record.promised_video_duration} video`,
+                  record.album_count > 0         && `${record.album_count} album${record.album_count !== 1 ? 's' : ''}`,
+                ].filter(Boolean).join('   ')}
+              </Text>
+            )}
+          </View>
+          <Text style={pdfStyles.tdAmount}>{fmt(record.total_amount)}</Text>
+        </View>
+
+        {/* Payment Summary */}
+        <View style={pdfStyles.summaryWrap}>
+          <View style={pdfStyles.summaryBox}>
+            <View style={pdfStyles.summaryRow}>
+              <Text style={pdfStyles.summaryLabel}>Subtotal</Text>
+              <Text style={pdfStyles.summaryVal}>{fmt(record.total_amount)}</Text>
+            </View>
+            {toNum(record.discount) > 0 && (
+              <View style={pdfStyles.summaryRow}>
+                <Text style={pdfStyles.summaryLabel}>Discount</Text>
+                <Text style={[pdfStyles.summaryVal, { color: '#16a34a' }]}>- {fmt(record.discount)}</Text>
+              </View>
+            )}
+            <View style={pdfStyles.divider} />
+            <View style={pdfStyles.summaryRow}>
+              <Text style={[pdfStyles.summaryLabel, { fontFamily: 'Helvetica-Bold', color: '#1a1a1a' }]}>Total</Text>
+              <Text style={pdfStyles.summaryVal}>{fmt(finalAmount)}</Text>
+            </View>
+            <View style={pdfStyles.summaryRow}>
+              <Text style={pdfStyles.summaryLabel}>Advance Paid ({(record.payment_method || 'cash').toUpperCase()})</Text>
+              <Text style={[pdfStyles.summaryVal, { color: '#00685f' }]}>- {fmt(record.advance_paid)}</Text>
+            </View>
+            <View style={[pdfStyles.divider, { borderBottomWidth: 2, borderBottomColor: '#aaa' }]} />
+            <View style={pdfStyles.balanceRow}>
+              <Text style={pdfStyles.balanceLabel}>Balance Due</Text>
+              <Text style={[pdfStyles.balanceLabel, { fontSize: 13, color: balanceColor }]}>
+                {balance > 0 ? fmt(balance) : 'PAID'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Delivery */}
+        {(record.delivery_status || record.delivery_date) && (
+          <View style={pdfStyles.deliveryBox}>
+            <View>
+              <Text style={pdfStyles.deliveryLbl}>Delivery Status</Text>
+              <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: statusColor }}>
+                {STATUS_LABELS[record.delivery_status] || record.delivery_status}
+              </Text>
+            </View>
+            {record.delivery_date && (
+              <View>
+                <Text style={pdfStyles.deliveryLbl}>Expected Delivery</Text>
+                <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1a1a1a' }}>{formatDate(record.delivery_date)}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Notes */}
+        {record.notes && (
+          <View style={pdfStyles.notesBox}>
+            <Text style={pdfStyles.notesLbl}>Notes</Text>
+            <Text style={pdfStyles.notesText}>{record.notes}</Text>
+          </View>
+        )}
+
+        {/* Footer */}
+        <View style={pdfStyles.footer}>
+          <Text>Thank you for choosing {studioName} · Generated by Fotokaran</Text>
+        </View>
+
+      </Page>
+    </Document>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Invoice Modal
+// ---------------------------------------------------------------------------
+function InvoiceModal({ record, studioName, onClose }) {
+  const printRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+
+  const finalAmount = toNum(record.total_amount) - toNum(record.discount);
+  const balance = finalAmount - toNum(record.advance_paid);
+  const invoiceDate = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+  const invNo = invoiceNumber(record);
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const blob = await pdf(
+        <InvoicePDFDoc record={record} studioName={studioName} />
+      ).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const clientSlug = record.client_name.trim().replace(/\s+/g, '_');
+      a.href = url;
+      a.download = `Invoice-${clientSlug}-${invNo}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('PDF generation failed:', err);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/50 backdrop-blur-sm overflow-y-auto py-8 px-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden">
+
+        {/* Toolbar */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 bg-zinc-50">
+          <div className="flex items-center gap-2">
+            <FileCheck2 size={16} className="text-teal-600" />
+            <span className="text-sm font-bold text-zinc-800">Invoice Preview — {invNo}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg, #00685f 0%, #008378 100%)' }}
+            >
+              {downloading
+                ? <><Loader2 size={14} className="animate-spin" /> Generating...</>
+                : <><Printer size={14} /> Download PDF</>
+              }
+            </button>
+            <button
+              onClick={onClose}
+              className="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Invoice body (preview) */}
+        <div ref={printRef} className="invoice px-10 py-8 bg-white">
+
+          {/* Header */}
+          <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-zinc-100">
+            <div>
+              <img src="/fotokaran-logo.png" alt="Fotokaran Studio" className="w-32 mb-2 bg-zinc-900 rounded-xl p-1" />
+              <p className="text-xs text-zinc-500 leading-relaxed mt-1">{studioName}</p>
+            </div>
+            <div className="text-right">
+              <h1 className="text-4xl font-black tracking-widest text-teal-700 mb-2">INVOICE</h1>
+              <p className="text-xs text-zinc-400 mb-0.5">Invoice No.</p>
+              <p className="text-sm font-bold text-zinc-900">{invNo}</p>
+              <p className="text-xs text-zinc-400 mt-1 mb-0.5">Date</p>
+              <p className="text-sm font-semibold text-zinc-700">{invoiceDate}</p>
+            </div>
+          </div>
+
+          {/* Bill To + Event */}
+          <div className="grid grid-cols-2 gap-8 mb-8">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[3px] text-teal-600 mb-3">Bill To</p>
+              <p className="text-base font-bold text-zinc-900">{record.client_name}</p>
+              {(record.bride_name || record.groom_name) && (
+                <p className="text-sm text-zinc-600 mt-0.5">
+                  {[record.bride_name, record.groom_name].filter(Boolean).join(' & ')}
+                </p>
+              )}
+              {record.phone && <p className="text-xs text-zinc-500 mt-1 flex items-center gap-1"><Phone size={10} /> {record.phone}</p>}
+              {record.email && <p className="text-xs text-zinc-500 mt-0.5 flex items-center gap-1"><Mail size={10} /> {record.email}</p>}
+              {record.address && <p className="text-xs text-zinc-500 mt-0.5 flex items-center gap-1"><MapPin size={10} /> {record.address}</p>}
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[3px] text-teal-600 mb-3">Event Details</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-xs text-zinc-600">
+                  <span className="font-semibold w-20 text-zinc-400">Type</span>
+                  <span className="font-bold text-zinc-800">{EVENT_TYPE_LABELS[record.event_type] || record.event_type}</span>
+                </div>
+                {record.event_date && (
+                  <div className="flex items-center gap-2 text-xs text-zinc-600">
+                    <span className="font-semibold w-20 text-zinc-400">Date</span>
+                    <span className="font-bold text-zinc-800">{formatDate(record.event_date)}</span>
+                  </div>
+                )}
+                {record.event_location && (
+                  <div className="flex items-center gap-2 text-xs text-zinc-600">
+                    <span className="font-semibold w-20 text-zinc-400">Venue</span>
+                    <span className="font-bold text-zinc-800">{record.event_location}</span>
+                  </div>
+                )}
+                {record.shoot_duration && (
+                  <div className="flex items-center gap-2 text-xs text-zinc-600">
+                    <span className="font-semibold w-20 text-zinc-400">Duration</span>
+                    <span className="font-bold text-zinc-800">{record.shoot_duration}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Package & Services */}
+          <table className="w-full mb-6">
+            <thead>
+              <tr className="bg-zinc-50">
+                <th className="text-left text-[10px] font-black uppercase tracking-widest text-zinc-400 px-4 py-3">Description</th>
+                <th className="text-left text-[10px] font-black uppercase tracking-widest text-zinc-400 px-4 py-3">Details</th>
+                <th className="text-right text-[10px] font-black uppercase tracking-widest text-zinc-400 px-4 py-3">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-zinc-50">
+                <td className="px-4 py-3 font-semibold text-zinc-800 text-sm">
+                  {record.package_name || 'Photography Package'}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {(record.services || []).length > 0
+                      ? (record.services || []).map(s => (
+                        <span key={s} className="inline-block bg-teal-50 text-teal-700 border border-teal-100 text-[10px] font-semibold px-2 py-0.5 rounded-full">{s}</span>
+                      ))
+                      : <span className="text-xs text-zinc-400">—</span>
+                    }
+                  </div>
+                  <div className="flex gap-4 mt-1.5 text-[11px] text-zinc-400">
+                    {record.promised_photos > 0 && <span>{record.promised_photos} photos</span>}
+                    {record.promised_video_duration && <span>{record.promised_video_duration} video</span>}
+                    {record.album_count > 0 && <span>{record.album_count} album{record.album_count !== 1 ? 's' : ''}</span>}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-bold text-zinc-900 text-sm">{fmt(record.total_amount)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Payment Summary */}
+          <div className="flex justify-end mb-8">
+            <div className="w-72">
+              <table className="w-full">
+                <tbody>
+                  <tr>
+                    <td className="py-1.5 text-xs text-zinc-500 font-medium">Subtotal</td>
+                    <td className="py-1.5 text-xs text-right font-semibold text-zinc-800">{fmt(record.total_amount)}</td>
+                  </tr>
+                  {toNum(record.discount) > 0 && (
+                    <tr>
+                      <td className="py-1.5 text-xs text-zinc-500 font-medium">Discount</td>
+                      <td className="py-1.5 text-xs text-right font-semibold text-green-600">− {fmt(record.discount)}</td>
+                    </tr>
+                  )}
+                  <tr className="border-t border-zinc-100">
+                    <td className="py-2 text-sm font-bold text-zinc-800">Total</td>
+                    <td className="py-2 text-sm text-right font-bold text-zinc-900">{fmt(finalAmount)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 text-xs text-zinc-500 font-medium">Advance Paid ({record.payment_method?.toUpperCase() || 'CASH'})</td>
+                    <td className="py-1.5 text-xs text-right font-semibold text-teal-700">− {fmt(record.advance_paid)}</td>
+                  </tr>
+                  <tr className="border-t-2 border-zinc-200">
+                    <td className="py-3 text-sm font-black text-zinc-900">Balance Due</td>
+                    <td className={`py-3 text-base text-right font-black ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {balance > 0 ? fmt(balance) : 'PAID ✓'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Delivery */}
+          {(record.delivery_date || record.delivery_status) && (
+            <div className="flex gap-6 mb-6 px-4 py-3 bg-zinc-50 rounded-xl border border-zinc-100 text-xs">
+              <div>
+                <span className="text-zinc-400 font-semibold uppercase tracking-widest text-[9px]">Delivery Status</span>
+                <p className={`font-bold mt-0.5 capitalize ${record.delivery_status === 'delivered' ? 'text-green-700' : record.delivery_status === 'editing' ? 'text-blue-700' : 'text-amber-700'}`}>
+                  {STATUS_LABELS[record.delivery_status] || record.delivery_status}
+                </p>
+              </div>
+              {record.delivery_date && (
+                <div>
+                  <span className="text-zinc-400 font-semibold uppercase tracking-widest text-[9px]">Expected Delivery</span>
+                  <p className="font-bold text-zinc-800 mt-0.5">{formatDate(record.delivery_date)}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Notes */}
+          {record.notes && (
+            <div className="mb-6 px-4 py-3 bg-amber-50 rounded-xl border border-amber-100">
+              <p className="text-[9px] font-black uppercase tracking-[3px] text-amber-700 mb-1">Notes</p>
+              <p className="text-xs text-zinc-600 leading-relaxed">{record.notes}</p>
+            </div>
+          )}
+
+          <p className="text-center text-[10px] text-zinc-300 mt-8 pt-6 border-t border-zinc-100">
+            Thank you for choosing {studioName} ·
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -139,9 +581,13 @@ function Segmented({ options, value, onChange }) {
 export default function EventManagement() {
   const { data: userData } = useCurrentUser();
   const user = userData?.user;
+  const studioName = userData?.studioName ?? 'Fotokaran Studio';
 
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Invoice state
+  const [invoiceRecord, setInvoiceRecord] = useState(null);
 
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -158,12 +604,12 @@ export default function EventManagement() {
   const [filterStatus, setFilterStatus] = useState('');
 
   // Package manager state
-  const [packages,        setPackages]        = useState([]);
-  const [showPkgManager,  setShowPkgManager]  = useState(false);
-  const [pkgForm,         setPkgForm]         = useState({ name: '', price: '', services: [], promised_photos: '', promised_video_duration: '', album_count: '', description: '' });
-  const [editingPkgId,    setEditingPkgId]    = useState(null);
-  const [savingPkg,       setSavingPkg]       = useState(false);
-  const [deletePkgId,     setDeletePkgId]     = useState(null);
+  const [packages, setPackages] = useState([]);
+  const [showPkgManager, setShowPkgManager] = useState(false);
+  const [pkgForm, setPkgForm] = useState({ name: '', price: '', services: [], promised_photos: '', promised_video_duration: '', album_count: '', description: '' });
+  const [editingPkgId, setEditingPkgId] = useState(null);
+  const [savingPkg, setSavingPkg] = useState(false);
+  const [deletePkgId, setDeletePkgId] = useState(null);
 
   // ---------------------------------------------------------------------------
   // Fetch
@@ -626,6 +1072,13 @@ export default function EventManagement() {
                       ) : (
                         <>
                           <button
+                            onClick={() => setInvoiceRecord(record)}
+                            className="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-400 hover:text-violet-600 hover:bg-violet-50 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Generate Invoice"
+                          >
+                            <FileCheck2 size={15} />
+                          </button>
+                          <button
                             onClick={() => openEdit(record)}
                             className="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-400 hover:text-teal-600 hover:bg-teal-50 transition-colors opacity-0 group-hover:opacity-100"
                             title="Edit"
@@ -649,6 +1102,15 @@ export default function EventManagement() {
           </div>
         )}
       </div>
+
+      {/* --------------- Invoice Modal --------------- */}
+      {invoiceRecord && (
+        <InvoiceModal
+          record={invoiceRecord}
+          studioName={studioName}
+          onClose={() => setInvoiceRecord(null)}
+        />
+      )}
 
       {/* --------------- Drawer overlay + panel --------------- */}
       {drawerOpen && (
@@ -811,11 +1273,10 @@ export default function EventManagement() {
                           key={svc}
                           type="button"
                           onClick={() => toggleService(svc)}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-colors text-left ${
-                            checked
+                          className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-colors text-left ${checked
                               ? 'border-teal-400 bg-teal-50 text-teal-800'
                               : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
-                          }`}
+                            }`}
                         >
                           {checked
                             ? <CheckSquare size={14} className="text-teal-600 shrink-0" />
@@ -1092,11 +1553,10 @@ export default function EventManagement() {
                             key={svc}
                             type="button"
                             onClick={() => togglePkgService(svc)}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-colors text-left ${
-                              checked
+                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-colors text-left ${checked
                                 ? 'border-teal-400 bg-teal-50 text-teal-800'
                                 : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
-                            }`}
+                              }`}
                           >
                             {checked
                               ? <CheckSquare size={14} className="text-teal-600 shrink-0" />
