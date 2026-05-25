@@ -223,6 +223,11 @@ export default function QRUpload() {
   const stageFiles = async (files) => {
     if (!user || !event || uploadState.phase !== 'idle') return;
 
+    if (Array.from(files).length > 1000) {
+      showToast('error', 'Too many photos', 'Maximum 1000 photos per upload. Please select up to 1000 at a time.');
+      return;
+    }
+
     const { allowed: validFiles, rejected } = filterAllowedFiles(Array.from(files));
     if (rejected.length > 0) {
       showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`);
@@ -433,9 +438,19 @@ export default function QRUpload() {
 
   /* ── Selection ── */
   const toggleSelect = (photoId) => setSelectedIds(prev => { const n = new Set(prev); n.has(photoId) ? n.delete(photoId) : n.add(photoId); return n; });
+  const MAX_DELETE = 500;
   const handleSelectAll = () => {
-    const allSel = photos.every(p => selectedIds.has(p.id));
-    setSelectedIds(allSel ? new Set() : new Set(photos.map(p => p.id)));
+    const allSel = photos.length <= MAX_DELETE
+      ? photos.every(p => selectedIds.has(p.id))
+      : selectedIds.size >= MAX_DELETE;
+    if (allSel) {
+      setSelectedIds(new Set());
+    } else if (photos.length > MAX_DELETE) {
+      setSelectedIds(new Set(photos.slice(0, MAX_DELETE).map(p => p.id)));
+      showToast('info', 'Maximum 500 selected', 'Delete these 500 first, then select the remaining photos.');
+    } else {
+      setSelectedIds(new Set(photos.map(p => p.id)));
+    }
   };
 
   /* ── Delete selected ── */
@@ -899,10 +914,17 @@ export default function QRUpload() {
             <div className="flex items-center gap-4">
               <h2 className="text-xl font-bold tracking-tight text-zinc-900">QR Gallery Photos</h2>
               {showGallery && photos.length > 0 && (
-                <button onClick={handleSelectAll} className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-violet-600 transition-colors">
-                  {photos.every(p => selectedIds.has(p.id)) ? <CheckSquare size={14} /> : <Square size={14} />}
-                  {photos.every(p => selectedIds.has(p.id)) ? 'Deselect All' : 'Select All'}
-                </button>
+                <>
+                  <button onClick={handleSelectAll} className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-violet-600 transition-colors">
+                    {(photos.length <= MAX_DELETE ? photos.every(p => selectedIds.has(p.id)) : selectedIds.size >= MAX_DELETE) ? <CheckSquare size={14} /> : <Square size={14} />}
+                    {(photos.length <= MAX_DELETE ? photos.every(p => selectedIds.has(p.id)) : selectedIds.size >= MAX_DELETE)
+                      ? 'Deselect All'
+                      : `Select All (${photos.length})`}
+                  </button>
+                  {photos.length > MAX_DELETE && selectedIds.size < MAX_DELETE && (
+                    <span className="text-[10px] text-orange-500 font-semibold">Max 500 at a time</span>
+                  )}
+                </>
               )}
             </div>
             {showGallery && selectedIds.size > 0 && (

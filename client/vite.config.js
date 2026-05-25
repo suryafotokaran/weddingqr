@@ -9,4 +9,13 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['libraw-wasm'],
   },
+  server: {
+    proxy: {
+      '/cf-graphql': {
+        target: 'https://api.cloudflare.com',
+        changeOrigin: true,
+        rewrite: () => '/client/v4/graphql',
+      },
+    },
+  },
 })

@@ -39,6 +39,7 @@ export default function SubmitReview() {
 
     // Upload example photos
     const uploadedPhotos = [];
+    let photosTotalBytes = 0;
     for (let i = 0; i < photos.length; i++) {
       const { file } = photos[i];
       setUploadMsg(`Uploading photo ${i + 1} of ${photos.length}…`);
@@ -48,6 +49,7 @@ export default function SubmitReview() {
         const storage_path = `site/testimonials/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
         await uploadToR2(compressed, storage_path);
         uploadedPhotos.push({ url: buildR2RefUrl(storage_path), storage_path });
+        photosTotalBytes += compressed.size;
       } catch {}
     }
 
@@ -59,6 +61,7 @@ export default function SubmitReview() {
       review: review.trim(),
       stars,
       photos: uploadedPhotos,
+      photos_size_bytes: photosTotalBytes,
       active: true,
       is_user_submitted: true,
     });

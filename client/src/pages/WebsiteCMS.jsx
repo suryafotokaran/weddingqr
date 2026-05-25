@@ -126,12 +126,15 @@ const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete }) => {
   );
 };
 
+const MAX_DELETE = 500;
 const SelectableImgGrid = ({ images, selectedIds, onToggleSelect, onSelectAll, onDeleteSelected, onDeleteSingle }) => {
   if (images.length === 0) return <p className="text-sm text-zinc-400 italic py-4">No photos yet.</p>;
-  const allSelected = images.length > 0 && selectedIds.size === images.length;
+  const allSelected = images.length <= MAX_DELETE
+    ? images.length > 0 && selectedIds.size === images.length
+    : selectedIds.size >= MAX_DELETE;
   return (
     <div>
-      <div className="flex items-center gap-3 mb-3">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
         <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-zinc-600">
           <input
             type="checkbox"
@@ -139,8 +142,11 @@ const SelectableImgGrid = ({ images, selectedIds, onToggleSelect, onSelectAll, o
             onChange={() => onSelectAll(images)}
             className="w-4 h-4 accent-teal-600 cursor-pointer"
           />
-          Select All
+          {allSelected ? 'Deselect All' : `Select All (${images.length})`}
         </label>
+        {images.length > MAX_DELETE && !allSelected && (
+          <span className="text-[11px] text-orange-500 font-semibold">Max 500 at a time</span>
+        )}
         {selectedIds.size > 0 && (
           <button
             onClick={onDeleteSelected}
@@ -783,7 +789,7 @@ export default function WebsiteCMS() {
         const nextOrder = (type === 'desktop' ? desktopBanners : mobileBanners).length + i;
         const { data, error } = await supabase
           .from('site_banners')
-          .insert({ type, url: refUrl, storage_path: storagePath, display_order: nextOrder, active: true })
+          .insert({ type, url: refUrl, storage_path: storagePath, display_order: nextOrder, active: true, size_bytes: compressed.size })
           .select()
           .single();
         if (!error) {
@@ -863,7 +869,7 @@ export default function WebsiteCMS() {
       const refUrl = buildR2RefUrl(storagePath);
       const { error } = await supabase
         .from('site_portfolios')
-        .update({ cover_url: refUrl, cover_storage_path: storagePath })
+        .update({ cover_url: refUrl, cover_storage_path: storagePath, cover_size_bytes: compressed.size })
         .eq('id', portfolioId);
       if (!error) {
         const displayUrl = await getSignedUrlForPath(storagePath).catch(() => refUrl);
@@ -895,7 +901,7 @@ export default function WebsiteCMS() {
         const nextOrder = portfolioPhotos.filter(p => p.portfolio_id === portfolioId).length + i;
         const { data, error } = await supabase
           .from('site_portfolio_photos')
-          .insert({ portfolio_id: portfolioId, url: refUrl, storage_path: storagePath, display_order: nextOrder })
+          .insert({ portfolio_id: portfolioId, url: refUrl, storage_path: storagePath, display_order: nextOrder, size_bytes: compressed.size })
           .select()
           .single();
         if (!error) {
@@ -948,7 +954,7 @@ export default function WebsiteCMS() {
         const refUrl = buildR2RefUrl(storagePath);
         const { data, error } = await supabase
           .from('site_gallery_photos')
-          .insert({ url: refUrl, storage_path: storagePath, display_order: galleryPhotos.length + i, active: true })
+          .insert({ url: refUrl, storage_path: storagePath, display_order: galleryPhotos.length + i, active: true, size_bytes: compressed.size })
           .select()
           .single();
         if (!error) {
@@ -976,8 +982,19 @@ export default function WebsiteCMS() {
   const onTogglePhotoSelect = (id) =>
     setSelectedPhotoIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const onSelectAllPhotos = (images) =>
-    setSelectedPhotoIds(prev => prev.size === images.length ? new Set() : new Set(images.map(i => i.id)));
+  const MAX_DELETE = 500;
+  const onSelectAllPhotos = (images) => {
+    const isMaxSelected = images.length <= MAX_DELETE
+      ? images.every(i => selectedPhotoIds.has(i.id))
+      : selectedPhotoIds.size >= MAX_DELETE;
+    if (isMaxSelected) {
+      setSelectedPhotoIds(new Set());
+    } else if (images.length > MAX_DELETE) {
+      setSelectedPhotoIds(new Set(images.slice(0, MAX_DELETE).map(i => i.id)));
+    } else {
+      setSelectedPhotoIds(new Set(images.map(i => i.id)));
+    }
+  };
 
   const onClearSelection = () => setSelectedPhotoIds(new Set());
 

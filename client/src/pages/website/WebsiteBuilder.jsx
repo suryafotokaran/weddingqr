@@ -161,7 +161,7 @@ function GalleryForm({ data, onChange, userId, eventName }) {
       await uploadToR2(file, key);
       const cmd = new GetObjectCommand({ Bucket: import.meta.env.VITE_R2_BUCKET, Key: key });
       const signedUrl = await getSignedUrl(s3Client, cmd, { expiresIn: 604800 }); // 7 days
-      update(items.map((x, j) => j === i ? { ...x, url: signedUrl, storage_path: key } : x));
+      update(items.map((x, j) => j === i ? { ...x, url: signedUrl, storage_path: key, size_bytes: file.size } : x));
     } catch (err) {
       alert('Upload failed: ' + err.message);
     }
@@ -289,7 +289,8 @@ export default function WebsiteBuilder() {
     if (!configId) return;
     setIsSaving(true);
     const newSlug = generateSlug(data.hero);
-    const updates = { data, template_id: templateId, updated_at: new Date().toISOString() };
+    const galleryBytes = (data?.gallery?.items ?? []).reduce((sum, item) => sum + (item.size_bytes || 0), 0);
+    const updates = { data, template_id: templateId, updated_at: new Date().toISOString(), gallery_size_bytes: galleryBytes };
     if (newSlug) updates.slug = newSlug;
     if (publish !== null) updates.is_published = publish;
     const { error } = await supabase.from('website_configs').update(updates).eq('id', configId);

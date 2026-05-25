@@ -366,6 +366,11 @@ export default function EventDetail() {
   const stageFiles = async (files) => {
     if (!user || !event || uploadState.phase !== 'idle') return;
 
+    if (Array.from(files).length > 1000) {
+      showToast('error', 'Too many photos', 'Maximum 1000 photos per upload. Please select up to 1000 at a time.');
+      return;
+    }
+
     const { allowed: allFiles, rejected } = filterAllowedFiles(Array.from(files));
     if (rejected.length > 0) {
       showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`);
@@ -747,9 +752,12 @@ export default function EventDetail() {
     });
   };
 
+  const MAX_DELETE = 500;
   const handleSelectAll = () => {
     const visiblePhotos = photos.filter(photo => activeTab === 'all' || (photo.likes_count || 0) > 0);
-    const allVisibleSelected = visiblePhotos.every(p => selectedIds.has(p.id));
+    const allVisibleSelected = visiblePhotos.length <= MAX_DELETE
+      ? visiblePhotos.every(p => selectedIds.has(p.id))
+      : selectedIds.size >= MAX_DELETE;
 
     if (allVisibleSelected) {
       setSelectedIds(prev => {
@@ -757,6 +765,9 @@ export default function EventDetail() {
         visiblePhotos.forEach(p => next.delete(p.id));
         return next;
       });
+    } else if (visiblePhotos.length > MAX_DELETE) {
+      setSelectedIds(new Set(visiblePhotos.slice(0, MAX_DELETE).map(p => p.id)));
+      showToast('info', 'Maximum 500 selected', 'Delete these 500 first, then select the remaining photos.');
     } else {
       setSelectedIds(prev => {
         const next = new Set(prev);
@@ -1477,13 +1488,24 @@ export default function EventDetail() {
                 {activeTab === 'all' ? 'Event Gallery' : 'Guest Favorites'}
               </h2>
               {showGallery && photos.length > 0 && (
-                <button
-                  onClick={handleSelectAll}
-                  className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-teal-600 transition-colors"
-                >
-                  {photos.filter(p => activeTab === 'all' || (p.likes_count || 0) > 0).every(p => selectedIds.has(p.id)) ? <CheckSquare size={14} /> : <Square size={14} />}
-                  {photos.filter(p => activeTab === 'all' || (p.likes_count || 0) > 0).every(p => selectedIds.has(p.id)) ? 'Deselect All' : 'Select All'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSelectAll}
+                    className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-teal-600 transition-colors"
+                  >
+                    {(() => {
+                      const vp = photos.filter(p => activeTab === 'all' || (p.likes_count || 0) > 0);
+                      const allSel = vp.length <= MAX_DELETE ? vp.every(p => selectedIds.has(p.id)) : selectedIds.size >= MAX_DELETE;
+                      return <>
+                        {allSel ? <CheckSquare size={14} /> : <Square size={14} />}
+                        {allSel ? 'Deselect All' : `Select All (${vp.length})`}
+                      </>;
+                    })()}
+                  </button>
+                  {photos.filter(p => activeTab === 'all' || (p.likes_count || 0) > 0).length > MAX_DELETE && selectedIds.size < MAX_DELETE && (
+                    <span className="text-[10px] text-orange-500 font-semibold">Max 500 at a time</span>
+                  )}
+                </div>
               )}
             </div>
 

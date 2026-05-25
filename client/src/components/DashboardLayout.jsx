@@ -12,6 +12,7 @@ import {
   CalendarDays,
   Receipt,
   Globe,
+  Database,
 } from "lucide-react";
 
 export default function DashboardLayout({ children }) {
@@ -42,6 +43,7 @@ export default function DashboardLayout({ children }) {
     { name: 'Overview', icon: LayoutDashboard, path: '/admin/studio' },
     { name: 'Events', icon: CalendarDays, path: '/admin/events' },
     { name: 'Website', icon: Globe, path: '/admin/website-cms' },
+    { name: 'R2 Storage', icon: Database, path: '/admin/r2-storage' },
   ];
 
   return (

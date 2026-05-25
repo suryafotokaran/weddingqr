@@ -20,6 +20,7 @@ import PublicWebsite from './pages/website/PublicWebsite';
 import ProtectedRoute from './components/ProtectedRoute';
 import WebsiteCMS from './pages/WebsiteCMS';
 import SubmitReview from './pages/SubmitReview';
+import R2Storage from './pages/R2Storage';
 
 import { PhotoProvider } from './photo/context/PhotoContext';
 import PhotoHomePage from './photo/PhotoHomePage';
@@ -73,6 +74,7 @@ function AppContent() {
         <Route path="/admin/events/:id/qr-upload" element={<ProtectedRoute><QRUpload /></ProtectedRoute>} />
         <Route path="/admin/events/:id/website" element={<ProtectedRoute><WebsiteBuilder /></ProtectedRoute>} />
         <Route path="/admin/events/new" element={<ProtectedRoute><Navigate to="/admin/createevent" replace /></ProtectedRoute>} />
+        <Route path="/admin/r2-storage" element={<ProtectedRoute><R2Storage /></ProtectedRoute>} />
 
         {/* Public review submission */}
         <Route path="/submit-review" element={<SubmitReview />} />
