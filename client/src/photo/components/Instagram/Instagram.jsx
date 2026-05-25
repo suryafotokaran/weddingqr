@@ -9,11 +9,11 @@ const Instagram = () => {
   const contact = siteContent.contact || {};
   const social  = siteContent.social  || {};
 
-  const address  = contact.address  || "V.P Theivam complex, 61/C, Tirupparankunram Rd, Vasanth Nagar, Madurai, Tamil Nadu 625003";
-  const phone    = contact.phone    || "+91 95972 30737";
+  const address  = contact.address  || "Veeravanallur, Tirunelveli, Tamil Nadu 627426";
+  const phone    = contact.phone    || "+91 84891 93088";
   const email    = contact.email    || "fotokaran@gmail.com";
-  const whatsapp = contact.whatsapp || "919597230737";
-  const mapsUrl  = contact.maps_url || "https://maps.app.goo.gl/KR8FtYPRa4eyB9ca6";
+  const whatsapp = contact.whatsapp || "918489193088";
+  const mapsUrl  = contact.maps_url || "https://maps.app.goo.gl/tVZzkF3669SeLifE9";
 
   return (
     <section className="max-w-[1200px] mx-auto py-20 px-4 overflow-hidden">

@@ -321,7 +321,7 @@ export default function EventLanding() {
           </button>
         </div>
 
-        {/* Website Builder Card — full width below */}
+        {/* Website Builder Card — commented out
         <div className="mt-6">
           <button
             onClick={() => navigate(`/admin/events/${id}/website`)}
@@ -371,6 +371,7 @@ export default function EventLanding() {
             </div>
           </button>
         </div>
+        */}
 
         {/* Danger Zone */}
         <div className="mt-12 bg-red-50 border border-red-100 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-4">

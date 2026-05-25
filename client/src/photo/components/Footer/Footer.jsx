@@ -11,7 +11,7 @@ const Footer = () => {
   const stayInTouch   = footer.stay_in_touch || "Keep up-to-date with all things Fotokaran! Join our community and never miss a moment!";
   const copyright     = footer.copyright     || "Copyright © 2025 Fotokaran Studio. All rights reserved.";
   const facebookUrl   = social.facebook      || "#";
-  const instagramUrl  = social.instagram     || "#";
+  const instagramUrl  = social.instagram     || "https://www.instagram.com/fotokaranstudio/";
 
   return (
     <footer>
@@ -48,6 +48,17 @@ const Footer = () => {
         </div>
       </div>
       <div className="py-4 px-4 text-sm text-neutral-400 bg-neutral-900 text-center">{copyright}</div>
+      <div className="py-2 px-4 text-xs text-neutral-600 bg-neutral-900 text-center border-t border-neutral-800">
+        Developed & Designed by{" "}
+        <a
+          href="https://wa.me/917200362436"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-neutral-400 font-medium hover:text-green-400 transition-colors"
+        >
+          Arjunan
+        </a>
+      </div>
     </footer>
   );
 };

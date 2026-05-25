@@ -13,19 +13,19 @@ const FloatingButtons = () => {
   }, []);
 
   const handleWhatsAppClick = () => {
-    const url = `https://wa.me/919597230737?text=${encodeURIComponent("Hello! I'm interested in your photography services.")}`;
+    const url = `https://wa.me/918489193088?text=${encodeURIComponent("Hello! I'm interested in your photography services.")}`;
     window.open(url, "_blank");
   };
 
   const handleInstagramClick = () => {
     window.open(
-      "#",
+      "https://www.instagram.com/fotokaranstudio/",
       "_blank"
     );
   };
 
   const handlePhoneClick = () => {
-    window.location.href = "tel:+919597230737";
+    window.location.href = "tel:+918489193088";
   };
 
   const size = isMobile ? "45px" : "50px";
