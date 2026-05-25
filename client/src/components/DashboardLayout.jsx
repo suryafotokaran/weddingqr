@@ -13,6 +13,7 @@ import {
   Receipt,
   Globe,
   Database,
+  Briefcase,
 } from "lucide-react";
 
 export default function DashboardLayout({ children }) {
@@ -42,6 +43,7 @@ export default function DashboardLayout({ children }) {
   const navItems = [
     { name: 'Overview', icon: LayoutDashboard, path: '/admin/studio' },
     { name: 'Events', icon: CalendarDays, path: '/admin/events' },
+    { name: 'Management', icon: Briefcase, path: '/admin/management' },
     { name: 'Website', icon: Globe, path: '/admin/website-cms' },
     { name: 'R2 Storage', icon: Database, path: '/admin/r2-storage' },
   ];
