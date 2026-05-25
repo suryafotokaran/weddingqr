@@ -13,18 +13,7 @@ const PSD_EXTENSIONS = new Set(['psd', 'psb']);
  * All allowed image file extensions.
  */
 export const ALLOWED_EXTENSIONS = new Set([
-  // Popular everyday formats
-  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp',
-  'heif', 'heic', 'avif', 'svg',
-  // Camera RAW formats
-  'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'sr2',
-  'orf', 'rw2', 'raf', 'pef', 'x3f', 'iiq', 'kdc',
-  // Editing & design formats
-  'psd', 'psb', 'ai', 'eps', 'indd', 'xcf', 'cpt', 'cdr',
-  // Web & modern formats
-  'apng', 'mng', 'ico', 'cur',
-  // Animation formats
-  'flif',
+  'jpg', 'jpeg', 'png', 'webp', 'bmp', 'svg', 'avif',
 ]);
 
 export function isAllowedImageFile(file) {

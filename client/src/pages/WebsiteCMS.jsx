@@ -17,7 +17,7 @@ import {
   Save, Plus, Trash2, Globe, MessageSquare, Wrench, Phone, FileText, Info, Image, Upload, X, Link, Copy, Check, Star,
 } from 'lucide-react';
 
-const COMPRESS_OPTS = { maxSizeMB: 1.5, maxWidthOrHeight: 2400, useWebWorker: true };
+const COMPRESS_OPTS = { maxSizeMB: 0.5, maxWidthOrHeight: 2400, useWebWorker: true };
 
 // ── Shared UI helpers ──────────────────────────────────────────────────────────
 

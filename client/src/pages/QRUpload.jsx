@@ -102,7 +102,7 @@ function ActionOverlay({ message = 'Processing...' }) {
 
 // ── Compression options ──────────────────────────────────────────────────────
 const getCompressionOptions = (maxMb) => ({
-  maxSizeMB: Math.min(maxMb, 2),
+  maxSizeMB: Math.min(maxMb, 0.5),
   maxWidthOrHeight: 3840,
   useWebWorker: true,
   preserveExifData: true,
@@ -116,6 +116,7 @@ export default function QRUpload() {
 
   const [event, setEvent] = useState(null);
   const [photos, setPhotos] = useState([]);
+  const [allPhotos, setAllPhotos] = useState([]);
   const [photoCount, setPhotoCount] = useState(0);
   const [storageUsed, setStorageUsed] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -199,7 +200,9 @@ export default function QRUpload() {
       .eq('event_id', id)
       .order('created_at', { ascending: false });
 
-    setPhotos((allPh ?? []).filter(p => p.source === 'qr_gallery'));
+    const allPhArr = allPh ?? [];
+    setAllPhotos(allPhArr);
+    setPhotos(allPhArr.filter(p => p.source === 'qr_gallery'));
 
     const [countRes, sizeRes] = await Promise.all([
       supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
@@ -225,20 +228,21 @@ export default function QRUpload() {
     }
     if (!validFiles.length) return;
 
+    // Dedup only within QR Upload photos (source='qr_gallery')
     const existingNames = new Set(photos.map(p => p.file_name));
     const uniqueFiles = validFiles.filter(f => !existingNames.has(f.name));
     const dupeCount = validFiles.length - uniqueFiles.length;
-    if (dupeCount > 0) {
-      showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`);
+    if (!uniqueFiles.length) {
+      showToast('error', 'All Duplicates', `All ${dupeCount} photo${dupeCount > 1 ? 's' : ''} already uploaded — nothing new to add.`);
+      return;
     }
-    if (!uniqueFiles.length) return;
-
-    await startUpload(uniqueFiles);
+    await startUpload(uniqueFiles, dupeCount);
   };
 
   /* ── Upload with compression + face embedding ── */
-  const startUpload = async (files) => {
+  const startUpload = async (files, skipped = 0) => {
     if (!files?.length || !user || !event) return;
+    const skipNote = skipped > 0 ? ` · ${skipped} duplicate${skipped > 1 ? 's' : ''} skipped` : '';
 
     cancelUploadRef.current = false;
     let cancelled = false;
@@ -250,7 +254,7 @@ export default function QRUpload() {
     }
 
     // ── Phase 1: Compress ─────────────────────────────────────────────────────
-    setToast({ type: 'loading', title: 'Compressing photos…', message: `0 of ${files.length} done` });
+    setToast({ type: 'loading', title: 'Compressing photos…', message: `0 of ${files.length} done${skipNote}` });
     const compressedItems = [];
     const compressStart = Date.now();
     for (let i = 0; i < files.length; i++) {
@@ -763,7 +767,7 @@ export default function QRUpload() {
             )}
           </div>
 
-          <input ref={fileInputRef} type="file" multiple accept="*" className="hidden" disabled={uploadState.phase !== 'idle'} onChange={handleFilePick} />
+          <input ref={fileInputRef} type="file" multiple accept=".jpg,.jpeg,.png,.webp,.bmp,.svg,.avif" className="hidden" disabled={uploadState.phase !== 'idle'} onChange={handleFilePick} />
           <input
             ref={folderInputRef}
             type="file"

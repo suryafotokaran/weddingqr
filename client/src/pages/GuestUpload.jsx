@@ -96,7 +96,7 @@ function UploadItem({ item }) {
 
 // ── Compression options ──────────────────────────────────────────────────────
 const getCompressionOptions = (maxMb) => ({
-  maxSizeMB:        Math.min(maxMb, 2),   // compress to event limit or 2MB, whichever is smaller
+  maxSizeMB:        Math.min(maxMb, 0.5),   // compress to event limit or 2MB, whichever is smaller
   maxWidthOrHeight: 3840,                 // 4K max — preserve quality
   useWebWorker:     true,
   preserveExifData: true,
@@ -471,7 +471,7 @@ export default function GuestUpload() {
                     : 'Share your photos'}
                 </p>
                 <p className="text-sm text-zinc-400 mt-1">Tap to pick photos or drop them here</p>
-                <p className="text-[11px] text-zinc-300 mt-0.5">Supports JPG, PNG, HEIC, WEBP, RAW, TIFF, PSD & more · Images auto-compressed</p>
+                <p className="text-[11px] text-zinc-300 mt-0.5">Supports JPG, PNG, WEBP, BMP, SVG, AVIF · Images auto-compressed</p>
               </div>
 
               <div className="flex gap-3" onClick={e => e.stopPropagation()}>
@@ -498,7 +498,7 @@ export default function GuestUpload() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept="*"
+              accept=".jpg,.jpeg,.png,.webp,.bmp,.svg,.avif"
               className="hidden"
               onChange={handleFilePick}
             />

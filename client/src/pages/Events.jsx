@@ -37,17 +37,20 @@ export default function Events() {
       const evList = data ?? [];
       setEvents(evList);
 
-      // Fetch photo counts for all events in one query
+      // Fetch exact photo counts per event (parallel HEAD queries — no row limit issue)
       if (evList.length > 0) {
-        const { data: photoData } = await supabase
-          .from('photos')
-          .select('event_id')
-          .in('event_id', evList.map(e => e.id));
-
+        const countResults = await Promise.all(
+          evList.map(e =>
+            supabase
+              .from('photos')
+              .select('*', { count: 'exact', head: true })
+              .eq('event_id', e.id)
+          )
+        );
         const counts = {};
-        for (const p of photoData ?? []) {
-          counts[p.event_id] = (counts[p.event_id] ?? 0) + 1;
-        }
+        evList.forEach((e, i) => {
+          counts[e.id] = countResults[i].count ?? 0;
+        });
         setPhotoCounts(counts);
       }
 

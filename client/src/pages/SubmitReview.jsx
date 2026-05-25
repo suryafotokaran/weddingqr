@@ -4,7 +4,7 @@ import { uploadToR2, buildR2RefUrl } from '../lib/s3';
 import imageCompression from 'browser-image-compression';
 import { Camera, CheckCircle, X, ImagePlus } from 'lucide-react';
 
-const COMPRESS_OPTS = { maxSizeMB: 1, maxWidthOrHeight: 1600, useWebWorker: true };
+const COMPRESS_OPTS = { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true };
 
 export default function SubmitReview() {
   const [name,       setName]       = useState('');

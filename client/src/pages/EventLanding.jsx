@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, Globe, Copy, Check
+  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, Globe, Copy, Check, Loader2
 } from 'lucide-react';
 import { deleteFromR2 } from '../lib/s3';
 import ConfirmModal from '../components/ConfirmModal';
@@ -363,6 +363,17 @@ export default function EventLanding() {
         onCancel={closeConfirm}
         confirmText="Delete"
       />
+
+      {/* Full-screen blocking overlay during delete */}
+      {isDeleting && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-4 min-w-[220px]">
+            <Loader2 size={36} className="animate-spin text-red-500" />
+            <p className="text-base font-bold text-zinc-800">Deleting Event…</p>
+            <p className="text-xs text-zinc-400 text-center">Please wait, this may take a moment.</p>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }
