@@ -100,14 +100,15 @@ export default function SignIn() {
           {loading ? 'Signing in…' : 'Sign In'}
         </button>
 
-        {/* Divider */}
+        {/* Divider — commented out
         <div className="flex items-center gap-3 my-4">
           <div className="flex-1 h-px bg-brand-outline-variant" />
           <span className="text-xs text-brand-outline font-medium">or</span>
           <div className="flex-1 h-px bg-brand-outline-variant" />
         </div>
+        */}
 
-        {/* Sign up link */}
+        {/* Sign up link — commented out
         <p className="text-center text-sm text-brand-on-surface-variant">
           Don't have an account?{' '}
           <button
@@ -118,6 +119,7 @@ export default function SignIn() {
             Create one
           </button>
         </p>
+        */}
       </form>
     </AuthLayout>
   );

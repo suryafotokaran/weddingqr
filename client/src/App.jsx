@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import SignIn from './pages/auth/SignIn';
-import SignUp from './pages/auth/SignUp';
+// import SignUp from './pages/auth/SignUp';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import OtpVerify from './pages/auth/OtpVerify';
 import ConfirmPassword from './pages/auth/ConfirmPassword';
@@ -57,7 +57,7 @@ function AppContent() {
 
         {/* Auth */}
         <Route path="/signin" element={<SignIn />} />
-        <Route path="/signup" element={<SignUp />} />
+        {/* <Route path="/signup" element={<SignUp />} /> */}
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/otp" element={<OtpVerify />} />
         <Route path="/confirm-password" element={<ConfirmPassword />} />

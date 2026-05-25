@@ -46,12 +46,14 @@ export default function Landing() {
             >
               Get Started
             </button>
+            {/* Create Account button — commented out
             <button
               onClick={() => navigate('/signup')}
               className="bg-brand-surface-white text-brand-primary border-2 border-brand-primary px-10 py-4 rounded-2xl text-base font-bold hover:bg-brand-surface-low transition-all duration-200 active:scale-95"
             >
               Create Account
             </button>
+            */}
           </div>
         </div>
 

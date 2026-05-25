@@ -62,9 +62,22 @@ const SaveBtn = ({ onClick, saving }) => (
 
 const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true }) => {
   const ref = useRef(null);
-  const btnLabel = uploading
-    ? (phase === 'compressing' ? 'Compressing…' : 'Uploading…')
-    : `Upload ${label}`;
+  const [dragging, setDragging] = useState(false);
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    if (uploading) return;
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    if (files.length) onFiles(multiple ? files : [files[0]]);
+  };
+
+  const handleDragOver = (e) => { e.preventDefault(); if (!uploading) setDragging(true); };
+  const handleDragLeave = () => setDragging(false);
+
+  const isLoading = !!uploading;
+  const statusLabel = phase === 'compressing' ? 'Compressing…' : 'Uploading…';
+
   return (
     <>
       <input
@@ -75,29 +88,105 @@ const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true }) => 
         multiple={multiple}
         onChange={e => { const files = Array.from(e.target.files); if (files.length) onFiles(files); e.target.value = ''; }}
       />
-      <button
-        disabled={!!uploading}
-        onClick={() => ref.current.click()}
-        className="flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-zinc-300 text-sm text-zinc-500 hover:border-teal-400 hover:text-teal-600 transition-colors disabled:opacity-50"
+      <div
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={() => !isLoading && ref.current.click()}
+        className={`mt-2 flex flex-col items-center justify-center gap-2 w-full py-7 rounded-2xl border-2 border-dashed transition-all cursor-pointer select-none
+          ${isLoading ? 'opacity-60 cursor-not-allowed border-zinc-200 bg-zinc-50' :
+            dragging ? 'border-teal-400 bg-teal-50 scale-[1.01]' :
+            'border-zinc-300 bg-zinc-50 hover:border-teal-400 hover:bg-teal-50'}`}
       >
-        <Upload size={15} />
-        {btnLabel}
-      </button>
+        {isLoading ? (
+          <>
+            <div className="w-7 h-7 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm font-medium text-teal-600">{statusLabel}</span>
+          </>
+        ) : (
+          <>
+            <Upload size={22} className={dragging ? 'text-teal-500' : 'text-zinc-400'} />
+            <div className="text-center">
+              <p className={`text-sm font-semibold ${dragging ? 'text-teal-600' : 'text-zinc-600'}`}>
+                {dragging ? 'Drop to upload' : `Drag & drop ${label.toLowerCase()} here`}
+              </p>
+              <p className="text-xs text-zinc-400 mt-0.5">or <span className="text-teal-600 underline underline-offset-2">browse files</span></p>
+            </div>
+          </>
+        )}
+      </div>
     </>
   );
 };
 
-const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete }) => {
+const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete, onRename }) => {
   const ref = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [nameVal, setNameVal] = useState(portfolio.name);
+  const inputRef = useRef(null);
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    if (uploading) return;
+    const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
+    if (file) onCoverFiles([file]);
+  };
+
+  const commitRename = () => {
+    const trimmed = nameVal.trim();
+    if (trimmed && trimmed !== portfolio.name) onRename(portfolio.id, trimmed);
+    setEditing(false);
+  };
+
   return (
-    <div className="flex items-center gap-4 border border-zinc-200 rounded-2xl p-4 bg-zinc-50">
-      <div className="w-20 h-20 rounded-xl overflow-hidden bg-zinc-200 flex-shrink-0">
+    <div
+      className={`flex items-center gap-4 border-2 rounded-2xl p-4 transition-all ${dragging ? 'border-teal-400 bg-teal-50' : 'border-zinc-200 bg-zinc-50'}`}
+      onDrop={handleDrop}
+      onDragOver={e => { e.preventDefault(); if (!uploading) setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+    >
+      <div
+        className={`w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 relative group cursor-pointer border-2 transition-all ${dragging ? 'border-teal-400 scale-105' : 'border-transparent'}`}
+        onClick={() => !uploading && ref.current.click()}
+        title="Click or drag to change cover"
+      >
         {portfolio.cover_url
           ? <img src={portfolio.cover_url} alt={portfolio.name} className="w-full h-full object-cover" />
-          : <div className="w-full h-full flex items-center justify-center text-zinc-400"><Image size={24} /></div>}
+          : <div className="w-full h-full flex items-center justify-center bg-zinc-200 text-zinc-400"><Image size={24} /></div>}
+        <div className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity ${dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+          <Upload size={16} className="text-white" />
+        </div>
       </div>
-      <div className="flex-1">
-        <p className="text-sm font-semibold text-zinc-800 mb-1">{portfolio.name}</p>
+      <div className="flex-1 min-w-0">
+        {editing ? (
+          <div className="flex items-center gap-2 mb-1">
+            <input
+              ref={inputRef}
+              autoFocus
+              value={nameVal}
+              onChange={e => setNameVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setNameVal(portfolio.name); setEditing(false); } }}
+              onBlur={commitRename}
+              className="flex-1 px-2 py-1 rounded-lg border border-teal-400 text-sm font-semibold text-zinc-800 focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 mb-1">
+            <p className="text-sm font-semibold text-zinc-800 truncate">{portfolio.name}</p>
+            <button
+              onClick={() => { setNameVal(portfolio.name); setEditing(true); }}
+              className="flex-shrink-0 p-0.5 rounded text-zinc-400 hover:text-teal-600 transition-colors"
+              title="Rename"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+          </div>
+        )}
         <p className="text-xs text-zinc-400 mb-2">{portfolio.photos?.length ?? 0} photos</p>
         <input
           ref={ref}
@@ -114,6 +203,7 @@ const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete }) => {
           <Upload size={12} />
           {uploading ? (phase === 'compressing' ? 'Compressing…' : 'Uploading…') : 'Change Cover'}
         </button>
+        {dragging && <p className="text-xs text-teal-600 font-medium mt-1">Drop to set cover</p>}
       </div>
       <button
         onClick={() => onDelete(portfolio.id)}
@@ -301,6 +391,7 @@ const PhotosPanel = ({
   onDeleteBanner,
   onUploadPortfolioCover,
   onDeletePortfolio,
+  onRenamePortfolio,
   onUploadPortfolioPhoto,
   onDeletePortfolioPhoto,
   onAddPortfolio,
@@ -386,6 +477,7 @@ const PhotosPanel = ({
                   phase={phase}
                   onCoverFiles={files => onUploadPortfolioCover(files, p.id)}
                   onDelete={onDeletePortfolio}
+                  onRename={onRenamePortfolio}
                 />
                 <div className="px-4 pb-4">
                   <button
@@ -838,6 +930,16 @@ export default function WebsiteCMS() {
     setPhotoUploading('');
   };
 
+  const onRenamePortfolio = async (portfolioId, newName) => {
+    const { error } = await supabase.from('site_portfolios').update({ name: newName }).eq('id', portfolioId);
+    if (!error) {
+      setPortfolios(p => p.map(pt => pt.id === portfolioId ? { ...pt, name: newName } : pt));
+      showToast('Portfolio renamed!');
+    } else {
+      showToast('Rename failed');
+    }
+  };
+
   const onDeletePortfolio = async (portfolioId) => {
     setUploadProgress({ phase: 'deleting', current: 1, total: 1 });
     // Cascade delete in DB handles site_portfolio_photos
@@ -861,10 +963,16 @@ export default function WebsiteCMS() {
     setPhotoUploading(`cover-${portfolioId}`);
     setUploadProgress({ phase: 'compressing', current: 1, total: 1 });
     try {
+      // Delete old cover from R2 if exists
+      const existing = portfolios.find(p => p.id === portfolioId);
+      if (existing?.cover_storage_path) {
+        await deleteFromR2([existing.cover_storage_path]).catch(() => {});
+      }
+
       const compressed = await imageCompression(file, COMPRESS_OPTS);
       setUploadProgress({ phase: 'uploading', current: 1, total: 1 });
       const ext = file.name.split('.').pop();
-      const storagePath = `site/portfolio/${portfolioId}/cover.${ext}`;
+      const storagePath = `site/portfolio/${portfolioId}/cover_${Date.now()}.${ext}`;
       await uploadToR2(compressed, storagePath);
       const refUrl = buildR2RefUrl(storagePath);
       const { error } = await supabase
@@ -1291,6 +1399,7 @@ export default function WebsiteCMS() {
                 onDeleteBanner={onDeleteBanner}
                 onUploadPortfolioCover={onUploadPortfolioCover}
                 onDeletePortfolio={onDeletePortfolio}
+                onRenamePortfolio={onRenamePortfolio}
                 onUploadPortfolioPhoto={onUploadPortfolioPhoto}
                 onDeletePortfolioPhoto={onDeletePortfolioPhoto}
                 onAddPortfolio={onAddPortfolio}
