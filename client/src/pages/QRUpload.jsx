@@ -27,6 +27,15 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function formatETA(ms) {
+  if (ms <= 0) return null;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `~${s}s left`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem > 0 ? `~${m}m ${rem}s left` : `~${m}m left`;
+}
+
 function SkeletonBlock({ className = '' }) {
   return (
     <div className={`relative overflow-hidden bg-zinc-200 rounded-xl ${className}`}>
@@ -211,11 +220,16 @@ export default function QRUpload() {
   const stageFiles = useCallback(async (files) => {
     if (!user || !event) return;
 
+    setToast({ type: 'loading', title: 'Preparing photos…', message: `Reading ${files.length} file${files.length !== 1 ? 's' : ''}…` });
+
     const { allowed: validFiles, rejected } = filterAllowedFiles(Array.from(files));
     if (rejected.length > 0) {
       setTimeout(() => showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`), 0);
     }
-    if (!validFiles.length) return;
+    if (!validFiles.length) {
+      setToast(null);
+      return;
+    }
 
     setStagedFiles(prev => {
       const existingNames = new Set([
@@ -240,6 +254,9 @@ export default function QRUpload() {
       });
       return [...prev, ...newItems];
     });
+
+    // Clear loading toast once files are staged
+    setTimeout(() => setToast(t => t?.type === 'loading' ? null : t), 200);
   }, [user, event, photos]);
 
   const removeStagedFile = (id) => setStagedFiles(prev => prev.filter(f => f.id !== id));
@@ -259,7 +276,9 @@ export default function QRUpload() {
     }
 
     // ── Phase 1: Compress ─────────────────────────────────────────────────────
+    setToast({ type: 'loading', title: 'Compressing photos…', message: `0 of ${stagedFiles.length} done` });
     const compressedItems = [];
+    const compressStart = Date.now();
     for (let i = 0; i < stagedFiles.length; i++) {
       if (cancelUploadRef.current) { cancelled = true; break; }
       const item = stagedFiles[i];
@@ -271,6 +290,10 @@ export default function QRUpload() {
         compressedItems.push({ ...item, compressed: item.file });
       }
       setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round(((i + 1) / stagedFiles.length) * 100), message: item.file.name });
+      const elapsed = Date.now() - compressStart;
+      const avgMs = elapsed / (i + 1);
+      const eta = formatETA(avgMs * (stagedFiles.length - i - 1));
+      setToast({ type: 'loading', title: 'Compressing photos…', message: `${i + 1} of ${stagedFiles.length} done${eta ? ` · ${eta}` : ''}` });
     }
 
     if (cancelled) {
@@ -289,7 +312,9 @@ export default function QRUpload() {
     }
 
     // ── Phase 2 & 3: Upload + Store Embeddings ────────────────────────────────
+    setToast({ type: 'loading', title: 'Uploading photos…', message: `0 of ${compressedItems.length} done` });
     const remainingStash = [...stagedFiles];
+    const uploadStart = Date.now();
     let uploaded = 0;
 
     for (let i = 0; i < compressedItems.length; i++) {
@@ -345,6 +370,10 @@ export default function QRUpload() {
         if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
         uploaded++;
         setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round(((i + 1) / compressedItems.length) * 100), message: item.file.name });
+        const uploadElapsed = Date.now() - uploadStart;
+        const uploadAvgMs = uploadElapsed / uploaded;
+        const uploadEta = formatETA(uploadAvgMs * (compressedItems.length - i - 1));
+        setToast({ type: 'loading', title: 'Uploading photos…', message: `${uploaded} of ${compressedItems.length} done${uploadEta ? ` · ${uploadEta}` : ''}` });
 
       } catch (err) {
         console.error('Upload error:', err);
