@@ -251,12 +251,38 @@ export default function GuestUpload() {
 
     setUploading(prev => [...newItems, ...prev]);
 
-    // Generate previews asynchronously (including RAW/PSD)
-    validFiles.forEach((f, idx) => {
-      generatePreviewUrl(f).then(url => {
-        setUploading(prev => prev.map(u => u.id === newItems[idx].id ? { ...u, previewUrl: url } : u));
-      }).catch(() => {});
-    });
+    // Generate previews — max 6 concurrent, batched state updates every 80 ms
+    ;(async () => {
+      const queue = newItems.map((item, idx) => ({ item, file: validFiles[idx] }));
+      let pending = {};
+      let flushTimer = null;
+
+      const flush = () => {
+        const updates = pending;
+        pending = {};
+        setUploading(prev => prev.map(u => updates[u.id] !== undefined ? { ...u, previewUrl: updates[u.id] } : u));
+      };
+
+      const CONCURRENCY = 6;
+      const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+        while (queue.length) {
+          const entry = queue.shift();
+          if (!entry) break;
+          try {
+            const url = await generatePreviewUrl(entry.file);
+            if (url) {
+              pending[entry.item.id] = url;
+              clearTimeout(flushTimer);
+              flushTimer = setTimeout(flush, 80);
+            }
+          } catch { /* skip */ }
+        }
+      });
+
+      await Promise.all(workers);
+      clearTimeout(flushTimer);
+      flush();
+    })();
 
     for (const item of newItems) {
       try {

@@ -15,7 +15,7 @@ import {
   Eye, EyeOff, Trash2, Square, CheckSquare, MonitorOff, Palette,
   FolderOpen,
 } from 'lucide-react';
-import { generatePreviewUrl, filterAllowedFiles } from '../lib/previewGenerator';
+import { filterAllowedFiles } from '../lib/previewGenerator';
 import * as faceapi from '@vladmandic/face-api';
 import { loadModels, extractMultipleEmbeddings } from '../lib/faceApi';
 
@@ -121,7 +121,6 @@ export default function QRUpload() {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [signedUrls, setSignedUrls] = useState({});
-  const [stagedFiles, setStagedFiles] = useState([]);
   const [uploadState, setUploadState] = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast] = useState(null);
@@ -216,59 +215,34 @@ export default function QRUpload() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  /* ── Stage files ── */
-  const stageFiles = useCallback(async (files) => {
-    if (!user || !event) return;
-
-    setToast({ type: 'loading', title: 'Preparing photos…', message: `Reading ${files.length} file${files.length !== 1 ? 's' : ''}…` });
+  /* ── Select → upload directly (no preview staging) ── */
+  const stageFiles = async (files) => {
+    if (!user || !event || uploadState.phase !== 'idle') return;
 
     const { allowed: validFiles, rejected } = filterAllowedFiles(Array.from(files));
     if (rejected.length > 0) {
-      setTimeout(() => showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`), 0);
+      showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`);
     }
-    if (!validFiles.length) {
-      setToast(null);
-      return;
+    if (!validFiles.length) return;
+
+    const existingNames = new Set(photos.map(p => p.file_name));
+    const uniqueFiles = validFiles.filter(f => !existingNames.has(f.name));
+    const dupeCount = validFiles.length - uniqueFiles.length;
+    if (dupeCount > 0) {
+      showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`);
     }
+    if (!uniqueFiles.length) return;
 
-    setStagedFiles(prev => {
-      const existingNames = new Set([
-        ...photos.map(p => p.file_name),
-        ...prev.map(s => s.file.name),
-      ]);
-      const uniqueFiles = validFiles.filter(f => !existingNames.has(f.name));
-      const dupeCount = validFiles.length - uniqueFiles.length;
-      if (dupeCount > 0) {
-        setTimeout(() => showToast('error', 'Duplicates Skipped', `${dupeCount} photo${dupeCount > 1 ? 's' : ''} already exist and were not added.`), 0);
-      }
-      const newItems = uniqueFiles.map(f => ({
-        id: Math.random().toString(36).slice(2),
-        file: f,
-        previewUrl: null,
-      }));
-      // Generate previews asynchronously (including RAW/PSD)
-      uniqueFiles.forEach((f, idx) => {
-        generatePreviewUrl(f).then(url => {
-          setStagedFiles(prev => prev.map(s => s.id === newItems[idx].id ? { ...s, previewUrl: url } : s));
-        }).catch(() => { });
-      });
-      return [...prev, ...newItems];
-    });
-
-    // Clear loading toast once files are staged
-    setTimeout(() => setToast(t => t?.type === 'loading' ? null : t), 200);
-  }, [user, event, photos]);
-
-  const removeStagedFile = (id) => setStagedFiles(prev => prev.filter(f => f.id !== id));
+    await startUpload(uniqueFiles);
+  };
 
   /* ── Upload with compression + face embedding ── */
-  const startUpload = async () => {
-    if (!stagedFiles.length || !user || !event) return;
+  const startUpload = async (files) => {
+    if (!files?.length || !user || !event) return;
 
     cancelUploadRef.current = false;
     let cancelled = false;
 
-    // Ensure models are ready BEFORE the upload loop starts
     try {
       await loadModels();
     } catch (modelErr) {
@@ -276,30 +250,29 @@ export default function QRUpload() {
     }
 
     // ── Phase 1: Compress ─────────────────────────────────────────────────────
-    setToast({ type: 'loading', title: 'Compressing photos…', message: `0 of ${stagedFiles.length} done` });
+    setToast({ type: 'loading', title: 'Compressing photos…', message: `0 of ${files.length} done` });
     const compressedItems = [];
     const compressStart = Date.now();
-    for (let i = 0; i < stagedFiles.length; i++) {
+    for (let i = 0; i < files.length; i++) {
       if (cancelUploadRef.current) { cancelled = true; break; }
-      const item = stagedFiles[i];
-      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round((i / stagedFiles.length) * 100), message: item.file.name });
+      const file = files[i];
+      setUploadState({ phase: 'compressing', current: i + 1, total: files.length, percent: Math.round((i / files.length) * 100), message: file.name });
       try {
-        const compressed = await imageCompression(item.file, getCompressionOptions(20));
-        compressedItems.push({ ...item, compressed });
+        const compressed = await imageCompression(file, getCompressionOptions(20));
+        compressedItems.push({ file, compressed });
       } catch {
-        compressedItems.push({ ...item, compressed: item.file });
+        compressedItems.push({ file, compressed: file });
       }
-      setUploadState({ phase: 'compressing', current: i + 1, total: stagedFiles.length, percent: Math.round(((i + 1) / stagedFiles.length) * 100), message: item.file.name });
+      setUploadState({ phase: 'compressing', current: i + 1, total: files.length, percent: Math.round(((i + 1) / files.length) * 100), message: file.name });
       const elapsed = Date.now() - compressStart;
-      const avgMs = elapsed / (i + 1);
-      const eta = formatETA(avgMs * (stagedFiles.length - i - 1));
-      setToast({ type: 'loading', title: 'Compressing photos…', message: `${i + 1} of ${stagedFiles.length} done${eta ? ` · ${eta}` : ''}` });
+      const eta = formatETA((elapsed / (i + 1)) * (files.length - i - 1));
+      setToast({ type: 'loading', title: 'Compressing photos…', message: `${i + 1} of ${files.length} done${eta ? ` · ${eta}` : ''}` });
     }
 
     if (cancelled) {
       cancelUploadRef.current = false;
       setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-      setStagedFiles([]); setSelectedFolderName(null);
+      setSelectedFolderName(null);
       return;
     }
 
@@ -313,7 +286,6 @@ export default function QRUpload() {
 
     // ── Phase 2 & 3: Upload + Store Embeddings ────────────────────────────────
     setToast({ type: 'loading', title: 'Uploading photos…', message: `0 of ${compressedItems.length} done` });
-    const remainingStash = [...stagedFiles];
     const uploadStart = Date.now();
     let uploaded = 0;
 
@@ -321,11 +293,7 @@ export default function QRUpload() {
       if (cancelUploadRef.current) { cancelled = true; break; }
       const item = compressedItems[i];
       setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round((i / compressedItems.length) * 100), message: item.file.name });
-      if (photos.some(p => p.file_name === item.file.name)) {
-        const idx = remainingStash.findIndex(s => s.id === item.id);
-        if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
-        continue;
-      }
+      if (photos.some(p => p.file_name === item.file.name)) continue;
 
       try {
         // 1. Upload compressed image → Cloudflare R2
@@ -366,13 +334,10 @@ export default function QRUpload() {
           console.warn('[Embed] Non-fatal face error:', faceErr.message);
         }
 
-        const idx = remainingStash.findIndex(s => s.id === item.id);
-        if (idx !== -1) { remainingStash.splice(idx, 1); setStagedFiles([...remainingStash]); }
         uploaded++;
         setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round(((i + 1) / compressedItems.length) * 100), message: item.file.name });
         const uploadElapsed = Date.now() - uploadStart;
-        const uploadAvgMs = uploadElapsed / uploaded;
-        const uploadEta = formatETA(uploadAvgMs * (compressedItems.length - i - 1));
+        const uploadEta = formatETA((uploadElapsed / uploaded) * (compressedItems.length - i - 1));
         setToast({ type: 'loading', title: 'Uploading photos…', message: `${uploaded} of ${compressedItems.length} done${uploadEta ? ` · ${uploadEta}` : ''}` });
 
       } catch (err) {
@@ -383,15 +348,14 @@ export default function QRUpload() {
 
     cancelUploadRef.current = false;
     setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-    if (cancelled) { setStagedFiles([]); setSelectedFolderName(null); }
+    if (!cancelled) setSelectedFolderName(null);
     if (uploaded > 0) {
-      if (!cancelled) setSelectedFolderName(null);
       showToast('success', cancelled ? 'Upload Paused' : 'Upload Complete', `${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded.`);
       await fetchData();
     }
   };
 
-  const handleDrop = useCallback((e) => { e.preventDefault(); setIsDragging(false); stageFiles(Array.from(e.dataTransfer.files)); }, [stageFiles]);
+  const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); stageFiles(Array.from(e.dataTransfer.files)); };
   const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = () => setIsDragging(false);
   const handleFilePick = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
@@ -780,15 +744,17 @@ export default function QRUpload() {
               <div className="flex gap-3" onClick={e => e.stopPropagation()}>
                 <button
                   type="button"
+                  disabled={uploadState.phase !== 'idle'}
                   onClick={() => fileInputRef.current?.click()}
-                  className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md active:scale-95 transition-all flex items-center gap-2"
+                  className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md active:scale-95 transition-all flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
                 >
                   <Upload size={14} /> Select Photos
                 </button>
                 <button
                   type="button"
+                  disabled={uploadState.phase !== 'idle'}
                   onClick={handleFolderPick}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-violet-700 border-2 border-violet-200 bg-white shadow transition-all active:scale-95 hover:border-violet-400 max-w-[180px]"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-violet-700 border-2 border-violet-200 bg-white shadow transition-all active:scale-95 hover:border-violet-400 max-w-[180px] disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
                 >
                   <FolderOpen size={14} className="shrink-0" />
                   <span className="truncate">{selectedFolderName ?? 'Select Folder'}</span>
@@ -797,12 +763,13 @@ export default function QRUpload() {
             )}
           </div>
 
-          <input ref={fileInputRef} type="file" multiple accept="*" className="hidden" onChange={handleFilePick} />
+          <input ref={fileInputRef} type="file" multiple accept="*" className="hidden" disabled={uploadState.phase !== 'idle'} onChange={handleFilePick} />
           <input
             ref={folderInputRef}
             type="file"
             multiple
             className="hidden"
+            disabled={uploadState.phase !== 'idle'}
             // @ts-ignore
             webkitdirectory="true"
             onChange={(e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; }}
@@ -878,56 +845,6 @@ export default function QRUpload() {
           </div>
         )}
 
-        {/* Staged Files */}
-        {uploadState.phase === 'idle' && stagedFiles.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 mb-6 relative animate-in fade-in duration-300">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-bold text-zinc-900 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-black">{stagedFiles.length}</span>
-                  Photos Ready to Upload
-                  {quotaFull && (
-                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-black animate-in fade-in duration-200">
-                      <X size={10} strokeWidth={3} />
-                      Storage Full
-                    </span>
-                  )}
-                </h3>
-                <p className="text-xs text-zinc-400 mt-1">Will be compressed automatically before uploading.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button onClick={() => { setStagedFiles([]); setSelectedFolderName(null); }} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-red-500 hover:bg-zinc-50 rounded-xl transition-all">Clear All</button>
-                <button onClick={startUpload} className="flex items-center gap-2 px-6 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white shadow-md text-sm font-bold active:scale-95 transition-all">
-                  <CloudUpload size={16} /> Upload Now
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[300px] overflow-y-auto pr-2">
-              {stagedFiles.map(staged => (
-                <div key={staged.id} className="relative aspect-square rounded-xl bg-zinc-100 overflow-hidden group">
-                  <div className="absolute top-1 right-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={(e) => { e.stopPropagation(); removeStagedFile(staged.id); }} className="w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-500 transition-colors">
-                      <X size={12} />
-                    </button>
-                  </div>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-100">
-                    <ImageIcon size={20} className="text-zinc-300 mb-1" />
-                    <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wide">.{staged.file.name.split('.').pop()}</span>
-                  </div>
-                  {staged.previewUrl && (
-                    <img
-                      src={staged.previewUrl}
-                      alt=""
-                      className="absolute inset-0 w-full h-full object-cover"
-                      onError={(e) => { e.target.style.display = 'none'; }}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Gallery */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7">
