@@ -172,6 +172,7 @@ export default function EventDetail() {
   const [photos, setPhotos] = useState([]);
   const [allPhotos, setAllPhotos] = useState([]);
   const [uploadState, setUploadState] = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+  const [skippedNames, setSkippedNames] = useState([]);
   const [quotaModal, setQuotaModal] = useState({ show: false, currentUsed: 0, trying: 0 });
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -374,12 +375,13 @@ export default function EventDetail() {
     // Dedup only within Photo Selection photos (source='host')
     const uploadedNames = new Set(photos.map(p => p.file_name));
     const unique = allFiles.filter(f => !uploadedNames.has(f.name));
-    const dupeCount = allFiles.length - unique.length;
+    const dupes = allFiles.filter(f => uploadedNames.has(f.name)).map(f => f.name);
+    setSkippedNames(dupes);
     if (!unique.length) {
-      showToast('error', 'All Duplicates', `All ${dupeCount} photo${dupeCount > 1 ? 's' : ''} already uploaded — nothing new to add.`);
+      showToast('error', 'All Duplicates', `All ${dupes.length} photo${dupes.length > 1 ? 's' : ''} already uploaded — nothing new to add.`);
       return;
     }
-    await startUpload(unique, dupeCount);
+    await startUpload(unique, dupes.length);
   };
 
   // ── Upload: compress all → upload all ────────────────────────────────────
@@ -499,6 +501,17 @@ export default function EventDetail() {
       resolve([]);
     }
   });
+
+  const downloadSkippedList = () => {
+    const content = `Skipped (Duplicate) Photos — Photo Selection\nEvent: ${event?.name || ''}\n\n` + skippedNames.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `skipped-photoselection-${event?.name || 'event'}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleDrop = async (e) => {
     e.preventDefault();
@@ -1328,6 +1341,36 @@ export default function EventDetail() {
               <p className={`text-sm font-black ${uploadState.phase === 'compressing' ? 'text-amber-500' : 'text-teal-600'}`}>
                 {uploadState.percent}%
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Skipped duplicates banner */}
+        {skippedNames.length > 0 && uploadState.phase === 'idle' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 mb-6 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertCircle size={15} className="text-amber-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-800">
+                  {skippedNames.length} duplicate{skippedNames.length > 1 ? 's' : ''} skipped
+                </p>
+                <p className="text-xs text-amber-600 truncate">
+                  {skippedNames.slice(0, 3).join(', ')}{skippedNames.length > 3 ? ` +${skippedNames.length - 3} more` : ''}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={downloadSkippedList}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 transition-all active:scale-95"
+              >
+                <Download size={12} /> Download List
+              </button>
+              <button onClick={() => setSkippedNames([])} className="text-amber-400 hover:text-amber-600 transition">
+                <X size={15} />
+              </button>
             </div>
           </div>
         )}

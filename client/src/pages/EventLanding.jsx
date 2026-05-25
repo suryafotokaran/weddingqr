@@ -131,7 +131,14 @@ export default function EventLanding() {
         closeConfirm();
         setIsDeleting(true);
         try {
-          if (storagePaths.length > 0) await deleteFromR2(storagePaths);
+          // Collect website gallery image paths from website_configs
+          const { data: wc } = await supabase.from('website_configs').select('data').eq('event_id', id).maybeSingle();
+          const websiteGalleryPaths = (wc?.data?.gallery?.items || [])
+            .map(item => item.storage_path)
+            .filter(Boolean);
+
+          const allPaths = [...storagePaths, ...websiteGalleryPaths];
+          if (allPaths.length > 0) await deleteFromR2(allPaths);
           await supabase.from('photos').delete().eq('event_id', id);
           const { error } = await supabase.from('events').delete().eq('id', id);
           if (error) throw error;

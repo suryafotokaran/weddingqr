@@ -123,6 +123,7 @@ export default function QRUpload() {
   const [copied, setCopied] = useState(false);
   const [signedUrls, setSignedUrls] = useState({});
   const [uploadState, setUploadState] = useState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+  const [skippedNames, setSkippedNames] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null, confirmText: 'Delete', isDestructive: true });
@@ -231,12 +232,13 @@ export default function QRUpload() {
     // Dedup only within QR Upload photos (source='qr_gallery')
     const existingNames = new Set(photos.map(p => p.file_name));
     const uniqueFiles = validFiles.filter(f => !existingNames.has(f.name));
-    const dupeCount = validFiles.length - uniqueFiles.length;
+    const dupes = validFiles.filter(f => existingNames.has(f.name)).map(f => f.name);
+    setSkippedNames(dupes);
     if (!uniqueFiles.length) {
-      showToast('error', 'All Duplicates', `All ${dupeCount} photo${dupeCount > 1 ? 's' : ''} already uploaded — nothing new to add.`);
+      showToast('error', 'All Duplicates', `All ${dupes.length} photo${dupes.length > 1 ? 's' : ''} already uploaded — nothing new to add.`);
       return;
     }
-    await startUpload(uniqueFiles, dupeCount);
+    await startUpload(uniqueFiles, dupes.length);
   };
 
   /* ── Upload with compression + face embedding ── */
@@ -357,6 +359,17 @@ export default function QRUpload() {
       showToast('success', cancelled ? 'Upload Paused' : 'Upload Complete', `${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded.`);
       await fetchData();
     }
+  };
+
+  const downloadSkippedList = () => {
+    const content = `Skipped (Duplicate) Photos — QR Upload\nEvent: ${event?.name || ''}\n\n` + skippedNames.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `skipped-qrupload-${event?.name || 'event'}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); stageFiles(Array.from(e.dataTransfer.files)); };
@@ -849,6 +862,36 @@ export default function QRUpload() {
           </div>
         )}
 
+
+        {/* Skipped duplicates banner */}
+        {skippedNames.length > 0 && uploadState.phase === 'idle' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertCircle size={15} className="text-amber-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-800">
+                  {skippedNames.length} duplicate{skippedNames.length > 1 ? 's' : ''} skipped
+                </p>
+                <p className="text-xs text-amber-600 truncate">
+                  {skippedNames.slice(0, 3).join(', ')}{skippedNames.length > 3 ? ` +${skippedNames.length - 3} more` : ''}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={downloadSkippedList}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 transition-all active:scale-95"
+              >
+                <Download size={12} /> Download List
+              </button>
+              <button onClick={() => setSkippedNames([])} className="text-amber-400 hover:text-amber-600 transition">
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Gallery */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7">

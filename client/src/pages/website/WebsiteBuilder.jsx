@@ -149,14 +149,14 @@ function FamilyForm({ data, onChange }) {
   );
 }
 
-function GalleryForm({ data, onChange, eventId }) {
+function GalleryForm({ data, onChange, userId, eventName }) {
   const items = data.gallery?.items || [];
   const update = items2 => onChange({ ...data, gallery: { ...data.gallery, items: items2 } });
 
   const handleUpload = async (i, file) => {
     if (!file) return;
     const ext = file.name.split('.').pop();
-    const key = `website-gallery/${eventId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const key = `${userId}/${eventName}/website-gallery/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     try {
       await uploadToR2(file, key);
       const cmd = new GetObjectCommand({ Bucket: import.meta.env.VITE_R2_BUCKET, Key: key });
@@ -215,10 +215,10 @@ function ThankyouForm({ data, onChange }) {
 
 const SECTION_FORMS = { hero: HeroForm, schedule: ScheduleForm, venue: VenueForm, location: LocationForm, family: FamilyForm, gallery: GalleryForm, thankyou: ThankyouForm };
 
-// Pass eventId to GalleryForm via a wrapper so it can upload to the right path
-function makeGalleryForm(eventId) {
+// Pass userId + eventName to GalleryForm via a wrapper so it can upload to the right path
+function makeGalleryForm(userId, eventName) {
   return function GalleryFormWrapper(props) {
-    return <GalleryForm {...props} eventId={eventId} />;
+    return <GalleryForm {...props} userId={userId} eventName={eventName} />;
   };
 }
 
@@ -240,6 +240,8 @@ export default function WebsiteBuilder() {
   const [mobileTab, setMobileTab] = useState('edit');
   const [previewMode, setPreviewMode] = useState('phone');
   const [slug, setSlug] = useState('');
+  const [eventUserId, setEventUserId] = useState('');
+  const [eventName, setEventName] = useState('');
 
   const generateSlug = (heroData) => {
     const g = (heroData?.groomName || '').trim();
@@ -254,6 +256,12 @@ export default function WebsiteBuilder() {
 
   useEffect(() => {
     (async () => {
+      const { data: ev } = await supabase.from('events').select('user_id, name').eq('id', eventId).single();
+      if (ev) {
+        setEventUserId(ev.user_id);
+        setEventName(ev.name);
+      }
+
       const { data: existing } = await supabase.from('website_configs').select('*').eq('event_id', eventId).single();
       if (existing) {
         setConfigId(existing.id);
@@ -410,7 +418,7 @@ export default function WebsiteBuilder() {
                   const secData = data[sec.key] || {};
                   const enabled = secData.enabled !== false;
                   const isOpen = activeSection === sec.key;
-                  const Form = sec.key === 'gallery' ? makeGalleryForm(eventId) : SECTION_FORMS[sec.key];
+                  const Form = sec.key === 'gallery' ? makeGalleryForm(eventUserId, eventName) : SECTION_FORMS[sec.key];
                   return (
                     <div key={sec.key} className={`rounded-xl border transition-all ${isOpen ? 'border-indigo-200 bg-indigo-50/30' : 'border-zinc-100 bg-white'}`}>
                       <div className="flex items-center gap-3 px-3 py-2.5">
