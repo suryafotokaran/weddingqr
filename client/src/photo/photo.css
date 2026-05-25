@@ -252,7 +252,7 @@ nav {
   display: flex;
   align-items: center;
   gap: 1rem;
-  animation: scroll 45s linear infinite;
+  animation: scroll 300s linear infinite;
 }
 
 @keyframes scroll {
