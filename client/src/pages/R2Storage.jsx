@@ -1,86 +1,135 @@
 import { useState, useEffect } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  HardDrive, Database, RefreshCw, AlertCircle,
-  ArrowUp, ArrowDown, Activity, Zap,
+  HardDrive, RefreshCw, AlertCircle, ArrowUp, ArrowDown,
+  DollarSign, CheckCircle, Layers, Activity, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
-// Extract Cloudflare account ID from the R2 endpoint URL
-// e.g. https://ACCOUNT_ID.r2.cloudflarestorage.com
-function getAccountId() {
-  const endpoint = import.meta.env.VITE_R2_ENDPOINT ?? '';
-  const match = endpoint.match(/https:\/\/([a-f0-9]+)\.r2\.cloudflarestorage\.com/);
-  return match ? match[1] : null;
-}
+// ── Pricing constants (USD) ───────────────────────────────────────────────────
+const PRICE_STORAGE = 0.015;   // per GB-month above free tier
+const PRICE_CLASS_A = 4.50;    // per million ops above free tier
+const PRICE_CLASS_B = 0.36;    // per million ops above free tier
+const FREE_BYTES = 10 * 1024 ** 3;
+const FREE_CLASS_A = 1_000_000;
+const FREE_CLASS_B = 10_000_000;
 
-function formatBytes(bytes) {
-  if (!bytes) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function formatNumber(n) {
-  if (!n) return '0';
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-  return n.toLocaleString();
-}
-
-// Cloudflare R2 Class A: write/mutate operations (1M free/month)
-const CLASS_A_OPS = new Set([
-  'ListBuckets', 'PutBucket', 'ListObjects', 'ListObjectsV2',
-  'PutObject', 'CopyObject', 'DeleteObject', 'DeleteObjects',
-  'CompleteMultipartUpload', 'CreateMultipartUpload', 'UploadPart',
-  'UploadPartCopy', 'AbortMultipartUpload', 'ListMultipartUploads', 'ListParts',
-  'PutBucketEncryption', 'GetBucketEncryption',
-  'PutBucketCors', 'GetBucketCors',
+const CLASS_A = new Set([
+  'ListBuckets', 'PutBucket', 'ListObjects', 'ListObjectsV2', 'PutObject', 'CopyObject',
+  'DeleteObject', 'DeleteObjects', 'CompleteMultipartUpload', 'CreateMultipartUpload',
+  'UploadPart', 'UploadPartCopy', 'AbortMultipartUpload', 'ListMultipartUploads', 'ListParts',
+  'PutBucketEncryption', 'GetBucketEncryption', 'PutBucketCors', 'GetBucketCors',
   'PutBucketLifecycleConfiguration', 'GetBucketLifecycleConfiguration',
   'GetBucketVersioning', 'PutBucketVersioning',
 ]);
-
-// Cloudflare R2 Class B: read operations (10M free/month)
-const CLASS_B_OPS = new Set([
+const CLASS_B = new Set([
   'GetObject', 'HeadObject', 'HeadBucket', 'UsageSummary', 'GetBucketUsage',
 ]);
 
-const FREE_STORAGE_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
-const FREE_CLASS_A       = 1_000_000;
-const FREE_CLASS_B       = 10_000_000;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function getAccountId() {
+  const ep = import.meta.env.VITE_R2_ENDPOINT ?? '';
+  const m = ep.match(/https:\/\/([a-f0-9]+)\.r2\.cloudflarestorage\.com/);
+  return m ? m[1] : null;
+}
 
+function fmtBytes(b) {
+  if (!b) return '0 B';
+  const k = 1024, s = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(b) / Math.log(k));
+  return `${parseFloat((b / k ** i).toFixed(2))} ${s[i]}`;
+}
+
+function fmtNum(n) {
+  if (!n) return '0';
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function pct(v, max) { return Math.min(100, (v / max) * 100); }
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+function StatCard({ label, value, sub, icon: Icon, accent = 'teal', loading }) {
+  const colors = {
+    teal: { bg: 'bg-teal-50', icon: 'text-teal-600' },
+    orange: { bg: 'bg-orange-50', icon: 'text-orange-500' },
+    blue: { bg: 'bg-blue-50', icon: 'text-blue-500' },
+    violet: { bg: 'bg-violet-50', icon: 'text-violet-600' },
+  };
+  const c = colors[accent];
+  return (
+    <div className="bg-white rounded-2xl border border-zinc-100 px-5 py-5 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">{label}</p>
+        <div className={`w-8 h-8 rounded-xl ${c.bg} flex items-center justify-center`}>
+          <Icon size={14} className={c.icon} />
+        </div>
+      </div>
+      <p className="text-2xl font-extrabold text-zinc-900 tracking-tight leading-none">
+        {loading ? <span className="text-zinc-200">———</span> : value}
+      </p>
+      <p className="text-[11px] text-zinc-400 leading-snug">{sub}</p>
+    </div>
+  );
+}
+
+function UsageBar({ label, used, max, freeLabel, accent = 'teal', loading }) {
+  const p = pct(used, max);
+  const over = p > 80;
+  const barColor = over
+    ? 'bg-red-500'
+    : accent === 'orange' ? 'bg-orange-400'
+      : accent === 'blue' ? 'bg-blue-500'
+        : 'bg-teal-600';
+  const badgeColor = over
+    ? 'bg-red-50 text-red-600'
+    : accent === 'orange' ? 'bg-orange-50 text-orange-600'
+      : accent === 'blue' ? 'bg-blue-50 text-blue-600'
+        : 'bg-teal-50 text-teal-700';
+
+  return (
+    <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm px-5 py-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm font-semibold text-zinc-700">{label}</p>
+        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${badgeColor}`}>
+          {loading ? '—' : `${p.toFixed(p < 1 ? 2 : 1)}%`}
+        </span>
+      </div>
+      <div className="h-2 bg-zinc-100 rounded-full overflow-hidden mb-2">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+          style={{ width: `${Math.max(loading ? 0 : p, 0.3)}%` }}
+        />
+      </div>
+      <p className="text-[11px] text-zinc-400">{loading ? '—' : freeLabel}</p>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function R2Storage() {
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [storageData, setStorageData] = useState(null);
-  const [opsData,     setOpsData]     = useState(null);
+  const [opsData, setOpsData] = useState(null);
+  const [gbMonths, setGbMonths] = useState(0);
+  const [showOps, setShowOps] = useState(false);
 
   const accountId = getAccountId();
-  const apiToken  = import.meta.env.VITE_CF_API_TOKEN;
-  const bucketName = import.meta.env.VITE_R2_BUCKET ?? 'foto-select';
+  const apiToken = import.meta.env.VITE_CF_API_TOKEN;
+  const bucket = import.meta.env.VITE_R2_BUCKET ?? 'foto-select';
 
   async function fetchMetrics() {
-    if (!apiToken) {
-      setError('VITE_CF_API_TOKEN is not set in .env.local');
-      setLoading(false);
-      return;
-    }
-    if (!accountId) {
-      setError('Could not determine Cloudflare Account ID from VITE_R2_ENDPOINT');
-      setLoading(false);
-      return;
-    }
+    if (!apiToken) { setError('VITE_CF_API_TOKEN not set in .env.local'); setLoading(false); return; }
+    if (!accountId) { setError('Cannot read Account ID from VITE_R2_ENDPOINT'); setLoading(false); return; }
 
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
 
-    const now          = new Date();
-    const today        = now.toISOString().split('T')[0];                          // "YYYY-MM-DD"
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-                           .toISOString().replace(/\.\d+Z$/, 'Z');                // "YYYY-MM-01T00:00:00Z"
-    const endOfDay     = `${today}T23:59:59Z`;
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().replace(/\.\d+Z$/, 'Z');
+    const endOfDay = `${today}T23:59:59Z`;
 
-    // Inline datetime values — avoids Cloudflare's strict Time scalar variable validation
     const query = `
       query R2Metrics($accountId: String!, $bucketName: String!) {
         viewer {
@@ -89,12 +138,18 @@ export default function R2Storage() {
               filter: { bucketName: $bucketName, date: "${today}" }
               limit: 1
             ) {
-              max {
-                payloadSize
-                metadataSize
-                objectCount
-                uploadCount
+              max { payloadSize metadataSize objectCount uploadCount }
+            }
+            dailyStorage: r2StorageAdaptiveGroups(
+              filter: {
+                bucketName: $bucketName
+                datetime_geq: "${startOfMonth}"
+                datetime_leq: "${endOfDay}"
               }
+              limit: 31
+            ) {
+              max { payloadSize }
+              dimensions { datetime }
             }
             r2OperationsAdaptiveGroups(
               filter: {
@@ -104,12 +159,8 @@ export default function R2Storage() {
               }
               limit: 10000
             ) {
-              dimensions {
-                actionType
-              }
-              sum {
-                requests
-              }
+              dimensions { actionType }
+              sum { requests }
             }
           }
         }
@@ -119,45 +170,42 @@ export default function R2Storage() {
     try {
       const res = await fetch('/cf-graphql', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiToken}`,
-        },
-        body: JSON.stringify({
-          query,
-          variables: { accountId, bucketName },
-        }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}` },
+        body: JSON.stringify({ query, variables: { accountId, bucketName: bucket } }),
       });
 
       const text = await res.text();
       let json;
-      try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 200)}`); }
-
+      try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON (${res.status}): ${text.slice(0, 200)}`); }
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${json?.errors?.[0]?.message ?? text.slice(0, 200)}`);
       if (json.errors) throw new Error(json.errors.map(e => e.message).join(' | '));
 
-      const account       = json.data?.viewer?.accounts?.[0];
-      const storageGroups = account?.r2StorageAdaptiveGroups ?? [];
-      const opsGroups     = account?.r2OperationsAdaptiveGroups ?? [];
+      const acct = json.data?.viewer?.accounts?.[0];
+      const storageRows = acct?.r2StorageAdaptiveGroups ?? [];
+      const dailyRows = acct?.dailyStorage ?? [];
+      const opsRows = acct?.r2OperationsAdaptiveGroups ?? [];
 
-      setStorageData(storageGroups[0]?.max ?? { payloadSize: 0, metadataSize: 0, objectCount: 0 });
+      setStorageData(storageRows[0]?.max ?? { payloadSize: 0, metadataSize: 0, objectCount: 0 });
+
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      let gbm = 0;
+      if (dailyRows.length > 0) {
+        const sumBytes = dailyRows.reduce((s, d) => s + (d.max?.payloadSize ?? 0), 0);
+        gbm = (sumBytes / dailyRows.length / (1024 ** 3)) * (dailyRows.length / daysInMonth);
+      }
+      setGbMonths(gbm);
 
       let classA = 0, classB = 0;
-      for (const g of opsGroups) {
-        const type  = g.dimensions?.actionType;
-        const count = g.sum?.requests ?? 0;
-        if (CLASS_A_OPS.has(type))      classA += count;
-        else if (CLASS_B_OPS.has(type)) classB += count;
+      for (const g of opsRows) {
+        const t = g.dimensions?.actionType;
+        const n = g.sum?.requests ?? 0;
+        if (CLASS_A.has(t)) classA += n;
+        else if (CLASS_B.has(t)) classB += n;
       }
+      setOpsData({ classA, classB, raw: opsRows });
 
-      setOpsData({
-        classA,
-        classB,
-        total: classA + classB,
-        raw: opsGroups,
-      });
     } catch (err) {
-      setError(err.message || 'Failed to fetch R2 metrics');
+      setError(err.message || 'Failed to load R2 metrics');
     } finally {
       setLoading(false);
     }
@@ -165,231 +213,241 @@ export default function R2Storage() {
 
   useEffect(() => { fetchMetrics(); }, []);
 
-  const storageBytes   = storageData?.payloadSize ?? 0;
-  const uploadCount    = storageData?.uploadCount ?? 0;
-  const storagePercent = Math.min(100, (storageBytes  / FREE_STORAGE_BYTES) * 100);
-  const classAPercent  = Math.min(100, ((opsData?.classA ?? 0) / FREE_CLASS_A) * 100);
-  const classBPercent  = Math.min(100, ((opsData?.classB ?? 0) / FREE_CLASS_B) * 100);
+  // Derived values
+  const storageBytes = storageData?.payloadSize ?? 0;
+  const classA = opsData?.classA ?? 0;
+  const classB = opsData?.classB ?? 0;
 
-  const monthName = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const billableGbm = Math.max(0, gbMonths - 10);
+  const billableA = Math.max(0, classA - FREE_CLASS_A);
+  const billableB = Math.max(0, classB - FREE_CLASS_B);
+  const costStorage = billableGbm * PRICE_STORAGE;
+  const costA = (billableA / 1e6) * PRICE_CLASS_A;
+  const costB = (billableB / 1e6) * PRICE_CLASS_B;
+  const totalCost = costStorage + costA + costB;
+  const isFree = totalCost === 0;
+
+  const month = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   return (
     <DashboardLayout>
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+      {/* ── Page header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
         <div>
-          <p className="text-teal-600 font-semibold tracking-widest text-[10px] uppercase mb-1.5">Infrastructure</p>
-          <h1 className="text-3xl font-bold tracking-tight text-zinc-900">R2 Storage</h1>
-          <p className="text-sm text-zinc-400 mt-1 font-medium">
-            Cloudflare R2 · <code className="text-xs bg-zinc-100 px-1.5 py-0.5 rounded-md">{bucketName}</code> · {monthName}
+          <p className="text-teal-600 font-bold tracking-widest text-[10px] uppercase mb-1">
+            Infrastructure · Cloudflare R2
+          </p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900">Storage Analytics</h1>
+          <p className="text-sm text-zinc-400 mt-1">
+            Bucket&nbsp;
+            <code className="text-xs bg-zinc-100 px-1.5 py-0.5 rounded-md font-mono">{bucket}</code>
+            &nbsp;· {month}
           </p>
         </div>
         <button
           onClick={fetchMetrics}
           disabled={loading}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-700 text-white text-sm font-semibold shadow-md hover:bg-teal-800 active:scale-95 transition-all shrink-0 disabled:opacity-60"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-semibold shadow hover:bg-zinc-800 active:scale-95 transition-all shrink-0 disabled:opacity-50"
         >
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           Refresh
         </button>
       </div>
 
-      {/* Error banner */}
+      {/* ── Error banner ── */}
       {error && (
-        <div className="bg-red-50 border border-red-100 rounded-2xl px-5 py-4 mb-6 flex items-start gap-3">
-          <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 bg-red-50 border border-red-100 rounded-2xl px-5 py-4 mb-6">
+          <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-semibold text-red-700">Cannot load R2 metrics</p>
-            <p className="text-xs text-red-500 mt-0.5">{error}</p>
+            <p className="text-sm font-bold text-red-700 mb-0.5">Could not load R2 metrics</p>
+            <p className="text-xs text-red-500 font-mono break-all">{error}</p>
             {!apiToken && (
               <p className="text-xs text-red-400 mt-2">
-                Add <code className="bg-red-100 px-1 py-0.5 rounded text-[11px]">VITE_CF_API_TOKEN=your_token</code> to{' '}
-                <code className="bg-red-100 px-1 py-0.5 rounded text-[11px]">client/.env.local</code> and restart the dev server.
-              </p>
-            )}
-            {error?.includes('403') && (
-              <p className="text-xs text-red-400 mt-2">
-                Token may be missing <strong>Account Analytics: Read</strong> permission. Go to Cloudflare → My Profile → API Tokens and verify the token scope includes Account Analytics.
+                Add <code className="bg-red-100 px-1 rounded">VITE_CF_API_TOKEN=your_token</code> to{' '}
+                <code className="bg-red-100 px-1 rounded">client/.env.local</code> and restart.
               </p>
             )}
           </div>
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {[
-          {
-            label: 'Actual Size Now',
-            value: loading ? '—' : formatBytes(storageBytes),
-            sub:   'Current files in bucket (not billing)',
-            icon:  HardDrive,
-          },
-          {
-            label: 'Objects Stored',
-            value: loading ? '—' : formatNumber(storageData?.objectCount ?? 0),
-            sub:   'Files in bucket',
-            icon:  Database,
-          },
-          {
-            label: 'Class A Ops',
-            value: loading ? '—' : formatNumber(opsData?.classA ?? 0),
-            sub:   `${classAPercent.toFixed(1)}% of 1M free`,
-            icon:  ArrowUp,
-          },
-          {
-            label: 'Class B Ops',
-            value: loading ? '—' : formatNumber(opsData?.classB ?? 0),
-            sub:   `${classBPercent.toFixed(1)}% of 10M free`,
-            icon:  ArrowDown,
-          },
-        ].map(({ label, value, sub, icon: Icon }) => (
-          <div key={label} className="bg-white rounded-2xl border border-zinc-100 px-5 py-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">{label}</p>
-              <div className="w-7 h-7 rounded-lg bg-teal-50 flex items-center justify-center">
-                <Icon size={14} className="text-teal-600" />
-              </div>
+      {/* ── Stat cards ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+        <StatCard
+          label="Storage Now"
+          value={fmtBytes(storageBytes)}
+          sub="Current bytes in bucket"
+          icon={HardDrive}
+          accent="teal"
+          loading={loading}
+        />
+        <StatCard
+          label="Objects"
+          value={fmtNum(storageData?.objectCount ?? 0)}
+          sub="Files stored in bucket"
+          icon={Layers}
+          accent="violet"
+          loading={loading}
+        />
+        <StatCard
+          label="Class A Ops"
+          value={fmtNum(classA)}
+          sub={`${pct(classA, FREE_CLASS_A).toFixed(2)}% of 1M free · writes`}
+          icon={ArrowUp}
+          accent="orange"
+          loading={loading}
+        />
+        <StatCard
+          label="Class B Ops"
+          value={fmtNum(classB)}
+          sub={`${pct(classB, FREE_CLASS_B).toFixed(2)}% of 10M free · reads`}
+          icon={ArrowDown}
+          accent="blue"
+          loading={loading}
+        />
+      </div>
+
+      {/* ── Usage bars ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+        <UsageBar
+          label="Storage (current size)"
+          used={storageBytes}
+          max={FREE_BYTES}
+          freeLabel={`${fmtBytes(storageBytes)} of 10 GB free · billing uses GB-months avg`}
+          accent="teal"
+          loading={loading}
+        />
+        <UsageBar
+          label="Class A · Writes &amp; Lists"
+          used={classA}
+          max={FREE_CLASS_A}
+          freeLabel={`${fmtNum(classA)} of 1M free this month`}
+          accent="orange"
+          loading={loading}
+        />
+        <UsageBar
+          label="Class B · Reads"
+          used={classB}
+          max={FREE_CLASS_B}
+          freeLabel={`${fmtNum(classB)} of 10M free this month`}
+          accent="blue"
+          loading={loading}
+        />
+      </div>
+
+      {/* ── Billing card ── */}
+      <div className={`rounded-2xl border p-5 mb-5 ${isFree ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+        {/* Title row */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isFree ? 'bg-emerald-100' : 'bg-amber-100'}`}>
+              {isFree
+                ? <CheckCircle size={18} className="text-emerald-600" />
+                : <DollarSign size={18} className="text-amber-600" />}
             </div>
-            <p className="text-2xl font-bold text-zinc-900 tracking-tight leading-none">{value}</p>
-            <p className="text-[11px] text-zinc-400">{sub}</p>
+            <div>
+              <p className="text-sm font-bold text-zinc-900">Estimated Bill — {month}</p>
+              <p className="text-xs text-zinc-500">Based on current usage · resets 1st of next month</p>
+            </div>
           </div>
-        ))}
+          <div className={`text-3xl font-extrabold tabular-nums ${isFree ? 'text-emerald-600' : 'text-amber-600'}`}>
+            {loading ? '—' : isFree ? '$0.00' : `$${totalCost.toFixed(4)}`}
+          </div>
+        </div>
+
+        {/* Billing rows */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {[
+            {
+              label: 'Storage',
+              detail: loading ? '—' : `${gbMonths.toFixed(3)} GB-months`,
+              free: '10 GB-months free',
+              billable: billableGbm > 0 ? `${billableGbm.toFixed(3)} × $0.015/GB` : null,
+              cost: costStorage,
+            },
+            {
+              label: 'Class A',
+              detail: loading ? '—' : `${classA.toLocaleString()} ops`,
+              free: '1M free',
+              billable: billableA > 0 ? `${billableA.toLocaleString()} × $4.50/M` : null,
+              cost: costA,
+            },
+            {
+              label: 'Class B',
+              detail: loading ? '—' : `${classB.toLocaleString()} ops`,
+              free: '10M free',
+              billable: billableB > 0 ? `${billableB.toLocaleString()} × $0.36/M` : null,
+              cost: costB,
+            },
+          ].map(({ label, detail, free, billable, cost }) => (
+            <div key={label} className="bg-white/70 rounded-xl px-4 py-3 backdrop-blur-sm">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-bold text-zinc-700">{label}</p>
+                <span className={`text-sm font-extrabold ${cost > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                  {loading ? '—' : cost > 0 ? `$${cost.toFixed(4)}` : '$0.00'}
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-500">{detail}</p>
+              <p className="text-[10px] text-zinc-400">{free}</p>
+              {billable && <p className="text-[10px] text-amber-500 font-semibold mt-0.5">{billable}</p>}
+            </div>
+          ))}
+        </div>
+
+        {isFree && !loading && (
+          <p className="text-[11px] text-emerald-600 font-semibold text-center mt-3">
+            You're fully within the free tier — no charges this month
+          </p>
+        )}
       </div>
 
-      {/* Storage bar */}
-      <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm px-5 py-4 mb-4 flex items-center gap-4">
-        <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
-          <HardDrive size={16} className="text-teal-600" />
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-sm font-medium text-zinc-600">
-              {formatBytes(storageBytes)}{' '}
-              <span className="text-zinc-400">current size · Cloudflare bills GB-months (avg over month)</span>
-            </p>
-            <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${storagePercent > 90 ? 'bg-red-50 text-red-600' : 'bg-teal-50 text-teal-700'}`}>
-              {storagePercent.toFixed(1)}%
-            </span>
-          </div>
-          <div className="h-2 bg-zinc-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${storagePercent > 90 ? 'bg-red-500' : 'bg-teal-600'}`}
-              style={{ width: `${Math.max(storagePercent, 0.4)}%` }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Class A bar */}
-      <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm px-5 py-4 mb-4 flex items-center gap-4">
-        <div className="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
-          <ArrowUp size={16} className="text-orange-500" />
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-sm font-medium text-zinc-600">
-              Class A Operations{' '}
-              <span className="text-zinc-400 font-normal text-xs">
-                (writes &amp; lists · {formatNumber(opsData?.classA ?? 0)} this month)
-              </span>
-            </p>
-            <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${classAPercent > 80 ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'}`}>
-              {classAPercent.toFixed(2)}% of 1M free
-            </span>
-          </div>
-          <div className="h-2 bg-zinc-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${classAPercent > 80 ? 'bg-red-500' : 'bg-orange-400'}`}
-              style={{ width: `${Math.max(classAPercent, 0.4)}%` }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Class B bar */}
-      <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm px-5 py-4 mb-6 flex items-center gap-4">
-        <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-          <ArrowDown size={16} className="text-blue-500" />
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-sm font-medium text-zinc-600">
-              Class B Operations{' '}
-              <span className="text-zinc-400 font-normal text-xs">
-                (reads · {formatNumber(opsData?.classB ?? 0)} this month)
-              </span>
-            </p>
-            <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${classBPercent > 80 ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
-              {classBPercent.toFixed(2)}% of 10M free
-            </span>
-          </div>
-          <div className="h-2 bg-zinc-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${classBPercent > 80 ? 'bg-red-500' : 'bg-blue-500'}`}
-              style={{ width: `${Math.max(classBPercent, 0.4)}%` }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Per-operation breakdown */}
-      {opsData?.raw?.length > 0 && (
+      {/* ── Operation breakdown (collapsible) ── */}
+      {(opsData?.raw?.length ?? 0) > 0 && (
         <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden mb-6">
-          <div className="px-5 py-4 border-b border-zinc-50 flex items-center gap-2">
-            <Activity size={16} className="text-teal-600" />
-            <h2 className="text-sm font-semibold text-zinc-900">
-              Operation Breakdown — {monthName}
-            </h2>
-          </div>
-          <div className="divide-y divide-zinc-50">
-            {[...opsData.raw]
-              .sort((a, b) => (b.sum?.requests ?? 0) - (a.sum?.requests ?? 0))
-              .map((g) => {
-                const type    = g.dimensions?.actionType ?? 'Unknown';
-                const count   = g.sum?.requests ?? 0;
-                const isClassA = CLASS_A_OPS.has(type);
-                const isClassB = CLASS_B_OPS.has(type);
-                return (
-                  <div key={type} className="flex items-center gap-3 px-5 py-3 hover:bg-zinc-50/50 transition-colors">
-                    <span className={`text-[10px] font-bold w-6 text-center px-1.5 py-0.5 rounded-full ${
-                      isClassA ? 'bg-orange-50 text-orange-600' :
-                      isClassB ? 'bg-blue-50 text-blue-600'   :
-                      'bg-zinc-100 text-zinc-400'
-                    }`}>
-                      {isClassA ? 'A' : isClassB ? 'B' : '—'}
-                    </span>
-                    <span className="text-sm text-zinc-700 font-medium flex-1">{type}</span>
-                    <span className="text-sm font-bold text-zinc-900 tabular-nums">
-                      {count.toLocaleString()}
-                    </span>
-                  </div>
-                );
-              })}
-          </div>
+          <button
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
+            onClick={() => setShowOps(v => !v)}
+          >
+            <div className="flex items-center gap-2">
+              <Activity size={15} className="text-teal-600" />
+              <span className="text-sm font-bold text-zinc-800">Operation Breakdown — {month}</span>
+              <span className="text-[10px] font-semibold bg-zinc-100 text-zinc-500 px-2 py-0.5 rounded-full">
+                {opsData.raw.length} types
+              </span>
+            </div>
+            {showOps
+              ? <ChevronUp size={16} className="text-zinc-400" />
+              : <ChevronDown size={16} className="text-zinc-400" />}
+          </button>
+
+          {showOps && (
+            <div className="border-t border-zinc-100 divide-y divide-zinc-50">
+              {[...opsData.raw]
+                .sort((a, b) => (b.sum?.requests ?? 0) - (a.sum?.requests ?? 0))
+                .map((g) => {
+                  const type = g.dimensions?.actionType ?? 'Unknown';
+                  const count = g.sum?.requests ?? 0;
+                  const isA = CLASS_A.has(type);
+                  const isB = CLASS_B.has(type);
+                  return (
+                    <div key={type} className="flex items-center gap-3 px-5 py-2.5 hover:bg-zinc-50/60 transition-colors">
+                      <span className={`text-[9px] font-extrabold w-5 h-5 flex items-center justify-center rounded-full shrink-0 ${isA ? 'bg-orange-100 text-orange-600'
+                          : isB ? 'bg-blue-100 text-blue-600'
+                            : 'bg-zinc-100 text-zinc-400'
+                        }`}>
+                        {isA ? 'A' : isB ? 'B' : '—'}
+                      </span>
+                      <span className="text-sm text-zinc-700 font-medium flex-1 truncate">{type}</span>
+                      <span className="text-sm font-bold text-zinc-900 tabular-nums">{count.toLocaleString()}</span>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Free-tier info callout */}
-      <div className="bg-teal-50 rounded-2xl border border-teal-100 px-5 py-4 mb-6">
-        <div className="flex items-start gap-3">
-          <Zap size={16} className="text-teal-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-teal-800">Cloudflare R2 Free Tier — What actually gets billed</p>
-            <p className="text-xs text-teal-600 mt-1">
-              Storage billing = <strong>GB-months</strong> (daily average over month) · Free: 10 GB-months · Paid: $0.015/GB-month
-            </p>
-            <p className="text-xs text-teal-500 mt-1">
-              Example: 1.3 GB stored for 3 of 30 days = 0.13 GB-months billed · Class A: free up to 1M/month · Class B: free up to 10M/month
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <footer className="py-5 border-t border-zinc-100 text-center">
-        <p className="text-xs text-zinc-300 font-medium">© 2025 WeddingQR · Cloudflare R2 Storage Analytics</p>
-      </footer>
 
     </DashboardLayout>
   );

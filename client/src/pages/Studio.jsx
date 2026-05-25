@@ -233,7 +233,7 @@ export default function Studio() {
           { label: 'Events Created',  value: loading ? '—' : events.length,                    icon: CalendarDays, onClick: null },
           { label: 'Photos Uploaded', value: loading ? '—' : photoCount.toLocaleString(),      icon: Camera,       onClick: null },
           { label: 'Storage Used',    value: loading ? '—' : formatBytes(storageUsed),         icon: HardDrive,    onClick: () => setShowStorage(true) },
-          { label: 'Capacity Used',   value: loading ? '—' : `${storagePercent.toFixed(1)}%`,  icon: HardDrive,    onClick: () => setShowStorage(true) },
+          { label: 'Capacity Used',   value: loading ? '—' : `${storagePercent.toFixed(1)}%`,  icon: HardDrive,    onClick: null },
         ].map(({ label, value, icon: Icon, onClick }) => (
           <div
             key={label}
@@ -290,7 +290,6 @@ export default function Studio() {
               <div className="h-full bg-teal-600 rounded-full transition-all duration-700" style={{ width: `${Math.max(storagePercent, 0.4)}%` }} />
             )}
           </div>
-          <p className="text-[10px] text-teal-600 font-semibold mt-1.5">Tap to see full breakdown →</p>
         </div>
       </div>
 

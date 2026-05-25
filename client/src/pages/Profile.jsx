@@ -59,7 +59,6 @@ export default function Profile() {
   const handleSaveStorage = async () => {
     const gb = parseFloat(storageLimitGb);
     if (!gb || gb < 10) return;
-    if (savedStorageLimitGb !== null && gb <= savedStorageLimitGb) return;
     setSavingStorage(true);
     setStorageSuccess('');
     const { error } = await supabase.auth.updateUser({ data: { storage_limit_gb: gb } });
@@ -71,12 +70,8 @@ export default function Profile() {
     }
   };
 
-  // Button is enabled when: value >= 10 AND (never saved OR value > saved)
   const storageGb = parseFloat(storageLimitGb);
-  const canSaveStorage =
-    !isNaN(storageGb) &&
-    storageGb >= 10 &&
-    (savedStorageLimitGb === null || storageGb > savedStorageLimitGb);
+  const canSaveStorage = !isNaN(storageGb) && storageGb >= 10;
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -228,7 +223,7 @@ export default function Profile() {
               <span className="text-sm font-semibold text-zinc-400">GB</span>
             </div>
             <p className="text-xs text-zinc-400 mt-1">
-              Minimum 10 GB. You can only increase this limit, not reduce it.
+              Minimum 10 GB. You can increase or decrease this limit anytime.
             </p>
           </label>
           <button
