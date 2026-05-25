@@ -143,6 +143,7 @@ export default function Studio() {
     eventPhotos: 0, siteBanners: 0, portfolioPhotos: 0,
     siteGallery: 0, websiteBuilder: 0, reviews: 0,
   });
+  const [eventStorages,   setEventStorages]   = useState({});
   const [loading,         setLoading]         = useState(true);
   const [showStorage,     setShowStorage]     = useState(false);
 
@@ -180,6 +181,18 @@ export default function Studio() {
           .select('gallery_size_bytes')
           .in('event_id', eventIds);
         websiteBuilder = (wbConfigs ?? []).reduce((acc, c) => acc + (c.gallery_size_bytes || 0), 0);
+
+        // Per-event storage for Recent Events display
+        const perEventResults = await Promise.all(
+          (evRes.data ?? []).map(e =>
+            supabase.from('photos').select('size_bytes').eq('event_id', e.id)
+          )
+        );
+        const storages = {};
+        (evRes.data ?? []).forEach((e, i) => {
+          storages[e.id] = (perEventResults[i].data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+        });
+        setEventStorages(storages);
       }
 
       const total = eventPhotos + siteBanners + portfolioPhotos + siteGallery + reviews + websiteBuilder;
@@ -343,6 +356,12 @@ export default function Studio() {
                     <span className="flex items-center gap-1"><CalendarDays size={10} />{formatDate(event.date)}</span>
                   </div>
                 </div>
+                {!loading && eventStorages[event.id] != null && (
+                  <span className="flex items-center gap-1 text-[10px] font-semibold text-zinc-400 bg-zinc-50 border border-zinc-100 px-2 py-0.5 rounded-full shrink-0 mr-1">
+                    <HardDrive size={9} className="text-teal-500" />
+                    {formatBytes(eventStorages[event.id])}
+                  </span>
+                )}
                 <ChevronRight size={15} className="text-zinc-200 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all shrink-0" />
               </div>
             ))}

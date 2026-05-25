@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import DashboardLayout from '../components/DashboardLayout';
 import {
-  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, Globe, Copy, Check, Loader2
+  Tag, CalendarDays, Images, QrCode, ChevronRight, Trash2, Globe, Copy, Check, Loader2, ArrowLeft
 } from 'lucide-react';
 import { deleteFromR2 } from '../lib/s3';
 import ConfirmModal from '../components/ConfirmModal';
@@ -65,10 +65,32 @@ export default function EventLanding() {
       setStoragePaths((ph ?? []).map(p => p.storage_path).filter(Boolean));
       setEventStorage((ph ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0));
 
-      // Global storage for user
+      // Global storage for user (all sources)
       if (userId) {
-        const { data: sizeRes } = await supabase.from('photos').select('size_bytes').eq('user_id', userId);
-        setStorageUsed((sizeRes ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0));
+        const [sizeRes, bannersRes, portfolioPhotosRes, portfoliosRes, galleryRes, testimonialsRes] = await Promise.all([
+          supabase.from('photos').select('size_bytes').eq('user_id', userId),
+          supabase.from('site_banners').select('size_bytes'),
+          supabase.from('site_portfolio_photos').select('size_bytes'),
+          supabase.from('site_portfolios').select('cover_size_bytes'),
+          supabase.from('site_gallery_photos').select('size_bytes'),
+          supabase.from('site_testimonials').select('photos_size_bytes'),
+        ]);
+        const { data: allUserEvents } = await supabase.from('events').select('id').eq('user_id', userId);
+        const userEventIds = (allUserEvents ?? []).map(e => e.id);
+        let websiteBuilder = 0;
+        if (userEventIds.length > 0) {
+          const { data: wbConfigs } = await supabase.from('website_configs').select('gallery_size_bytes').in('event_id', userEventIds);
+          websiteBuilder = (wbConfigs ?? []).reduce((acc, c) => acc + (c.gallery_size_bytes || 0), 0);
+        }
+        const total =
+          (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+          (bannersRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+          (portfolioPhotosRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+          (portfoliosRes.data ?? []).reduce((acc, p) => acc + (p.cover_size_bytes || 0), 0) +
+          (galleryRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+          (testimonialsRes.data ?? []).reduce((acc, p) => acc + (p.photos_size_bytes || 0), 0) +
+          websiteBuilder;
+        setStorageUsed(total);
       }
 
       setLoading(false);
@@ -155,6 +177,15 @@ export default function EventLanding() {
   return (
     <DashboardLayout>
       <div className="max-w-5xl mx-auto py-6">
+
+        {/* Back button */}
+        <button
+          onClick={() => navigate('/admin/studio')}
+          className="flex items-center gap-1.5 text-xs font-semibold text-zinc-500 hover:text-teal-700 transition-colors mb-3 group"
+        >
+          <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+          Back to Dashboard
+        </button>
 
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-6 w-full overflow-hidden">

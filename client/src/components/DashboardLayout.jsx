@@ -55,7 +55,7 @@ export default function DashboardLayout({ children }) {
         <div className="flex items-center gap-12">
           <span className="text-xl font-semibold tracking-tighter text-teal-800">{studioName}</span>
           <div className="hidden md:flex items-center space-x-8 text-sm tracking-tight">
-            <a className={`font-bold transition-colors ${location.pathname === '/admin/studio' ? 'text-teal-700 border-b-2 border-teal-600' : 'text-zinc-500 hover:text-teal-600'}`} href="/admin/studio">Dashboard</a>
+            <button onClick={() => navigate('/admin/studio')} className={`font-bold transition-colors ${location.pathname === '/admin/studio' ? 'text-teal-700 border-b-2 border-teal-600' : 'text-zinc-500 hover:text-teal-600'}`}>Dashboard</button>
             <a className="text-zinc-500 font-medium hover:text-teal-600 transition-colors" href="#">Galleries</a>
             <a className="text-zinc-500 font-medium hover:text-teal-600 transition-colors" href="#">Clients</a>
             <a className="text-zinc-500 font-medium hover:text-teal-600 transition-colors" href="#">Settings</a>
