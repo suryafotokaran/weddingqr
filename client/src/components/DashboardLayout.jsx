@@ -14,6 +14,8 @@ import {
   Globe,
   Database,
   Briefcase,
+  Menu,
+  X,
 } from "lucide-react";
 
 export default function DashboardLayout({ children }) {
@@ -23,6 +25,7 @@ export default function DashboardLayout({ children }) {
   const studioName = userData?.studioName ?? 'WeddingQR Studio';
   const fullName = userData?.fullName ?? 'Photographer';
   const [showDropdown, setShowDropdown] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -51,8 +54,16 @@ export default function DashboardLayout({ children }) {
   return (
     <div className="text-zinc-900 bg-zinc-50 min-h-screen">
       {/* TopNavBar */}
-      <div className="fixed top-0 z-50 w-full px-8 py-4 flex justify-between items-center bg-white/80 backdrop-blur-xl shadow-[0_12px_40px_rgba(26,28,28,0.04)]">
-        <div className="flex items-center gap-12">
+      <div className="fixed top-0 z-50 w-full px-4 md:px-8 py-4 flex justify-between items-center bg-white/80 backdrop-blur-xl shadow-[0_12px_40px_rgba(26,28,28,0.04)]">
+        <div className="flex items-center gap-3 md:gap-12">
+          {/* Hamburger — mobile only */}
+          <button
+            className="lg:hidden p-2 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu size={22} />
+          </button>
           <img src="/fotokaran-logo.png" alt="Fotokaran Studio" className="h-9 w-9 rounded-lg object-cover bg-zinc-900" />
           <div className="hidden md:flex items-center space-x-8 text-sm tracking-tight">
             <button onClick={() => navigate('/admin/studio')} className={`font-bold transition-colors ${location.pathname === '/admin/studio' ? 'text-teal-700 border-b-2 border-teal-600' : 'text-zinc-500 hover:text-teal-600'}`}>Dashboard</button>
@@ -105,6 +116,79 @@ export default function DashboardLayout({ children }) {
         </div>
       </div>
 
+      {/* Mobile Sidebar Overlay */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* Mobile Sidebar Drawer */}
+      <aside
+        className={`fixed top-0 left-0 z-50 h-full w-72 bg-white shadow-2xl flex flex-col lg:hidden transition-transform duration-300 ease-in-out ${
+          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100">
+          <div className="flex items-center gap-3">
+            <img src="/fotokaran-logo.png" alt="Fotokaran Studio" className="h-8 w-8 rounded-lg object-cover bg-zinc-900" />
+            <div>
+              <h3 className="text-sm font-bold text-teal-900 tracking-tight leading-tight">{studioName}</h3>
+              <p className="text-xs text-zinc-500">Photography Studio</p>
+            </div>
+          </div>
+          <button
+            className="p-2 rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors"
+            onClick={() => setMobileSidebarOpen(false)}
+            aria-label="Close menu"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Drawer Nav Items */}
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+          {navItems.map((item) => {
+            const isActive = item.path !== '#' && (
+              location.pathname.startsWith(item.path) ||
+              (item.path === '/admin/events' && location.pathname === '/admin/createevent')
+            );
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.name}
+                onClick={() => { navigate(item.path); setMobileSidebarOpen(false); }}
+                className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium transition-colors duration-150 ${
+                  isActive
+                    ? 'bg-orange-100 text-orange-900'
+                    : 'text-zinc-600 hover:bg-zinc-100'
+                }`}
+              >
+                <Icon size={20} className={isActive ? 'text-teal-700' : ''} />
+                {item.name}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Drawer Footer */}
+        <div className="p-4 border-t border-zinc-100">
+          <button
+            onClick={() => { navigate('/admin/profile'); setMobileSidebarOpen(false); }}
+            className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium transition-colors duration-150 ${
+              location.pathname === '/admin/profile'
+                ? 'bg-orange-100 text-orange-900'
+                : 'text-zinc-600 hover:bg-zinc-100'
+            }`}
+          >
+            <Settings size={20} className={location.pathname === '/admin/profile' ? 'text-teal-700' : ''} />
+            Settings
+          </button>
+        </div>
+      </aside>
+
       <div className="flex min-h-screen pt-24">
         {/* SideNavBar */}
         <aside className="hidden lg:flex flex-col w-64 h-[calc(100vh-6rem)] p-4 space-y-2 bg-zinc-50 sticky top-24">
@@ -149,7 +233,7 @@ export default function DashboardLayout({ children }) {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 px-8 pb-12 overflow-x-hidden">
+        <main className="flex-1 px-4 md:px-8 pb-12 overflow-x-hidden">
           {children}
         </main>
       </div>
