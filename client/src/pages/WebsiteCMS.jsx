@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import DashboardLayout from '../components/DashboardLayout';
@@ -14,8 +14,78 @@ async function signItems(items, pathField = 'storage_path') {
 }
 import imageCompression from 'browser-image-compression';
 import {
-  Save, Plus, Trash2, Globe, MessageSquare, Wrench, Phone, FileText, Info, Image, Upload, X, Link, Copy, Check, Star,
+  Save, Plus, Trash2, Globe, MessageSquare, Wrench, Phone, FileText, Info, Image, Upload, X, Link, Copy, Check, Star, Loader2,
 } from 'lucide-react';
+
+function GoogleDriveIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+      <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+      <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+      <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+      <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+      <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+      <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 27h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+    </svg>
+  );
+}
+
+// Shared Google Drive picker — loaded once, reused across all ImgUploadBtn instances
+const googleTokenStore = { token: null };
+function loadGoogleScripts() {
+  return new Promise((resolve) => {
+    if (window.gapi && window.google?.accounts) { resolve(); return; }
+    const gapiScript = document.createElement('script');
+    gapiScript.src = 'https://apis.google.com/js/api.js';
+    gapiScript.onload = () => {
+      window.gapi.load('picker', () => {
+        if (window.google?.accounts) { resolve(); return; }
+        const gisScript = document.createElement('script');
+        gisScript.src = 'https://accounts.google.com/gsi/client';
+        gisScript.onload = resolve;
+        document.head.appendChild(gisScript);
+      });
+    };
+    document.head.appendChild(gapiScript);
+  });
+}
+async function openDrivePicker(onFiles) {
+  const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY;
+  if (!CLIENT_ID || !API_KEY) { alert('Google Drive is not configured. Add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to .env.local.'); return; }
+  await loadGoogleScripts();
+  const mimeToExt = { 'image/jpeg':'jpg','image/jpg':'jpg','image/png':'png','image/webp':'webp','image/bmp':'bmp','image/avif':'avif','image/svg+xml':'svg','image/gif':'jpg' };
+  const accessToken = await new Promise((resolve, reject) => {
+    const tc = window.google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID, scope: 'https://www.googleapis.com/auth/drive.readonly',
+      callback: (r) => r.error ? reject(new Error(r.error)) : resolve(r.access_token),
+    });
+    tc.requestAccessToken({ prompt: googleTokenStore.token ? '' : 'consent' });
+  });
+  googleTokenStore.token = accessToken;
+  const picker = new window.google.picker.PickerBuilder()
+    .addView(new window.google.picker.DocsView().setMimeTypes('image/jpeg,image/png,image/webp,image/bmp,image/avif,image/svg+xml').setIncludeFolders(false))
+    .setOAuthToken(accessToken).setDeveloperKey(API_KEY)
+    .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
+    .setTitle('Select photos from Google Drive')
+    .setCallback(async (data) => {
+      if (data.action !== window.google.picker.Action.PICKED) return;
+      const docs = data[window.google.picker.Response.DOCUMENTS];
+      const files = await Promise.all(docs.map(async (doc) => {
+        let   fileName = doc[window.google.picker.Document.NAME];
+        const mimeType = doc[window.google.picker.Document.MIME_TYPE] || 'image/jpeg';
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${doc[window.google.picker.Document.ID]}?alt=media`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!res.ok) throw new Error(`Failed to download ${fileName}`);
+        const blob = await res.blob();
+        const currentExt = (fileName.split('.').pop() || '').toLowerCase();
+        const safeExt = mimeToExt[mimeType];
+        if (safeExt && !['jpg','jpeg','png','webp','bmp','svg','avif'].includes(currentExt)) fileName = fileName.replace(/\.[^.]+$/, '') + '.' + safeExt;
+        return new File([blob], fileName, { type: mimeType === 'image/gif' ? 'image/jpeg' : mimeType });
+      }));
+      onFiles(files);
+    }).build();
+  picker.setVisible(true);
+}
 
 const COMPRESS_OPTS = { maxSizeMB: 0.5, maxWidthOrHeight: 2400, useWebWorker: true };
 
@@ -62,38 +132,40 @@ const SaveBtn = ({ onClick, saving }) => (
 
 const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true, quotaFull = false, storageLoaded = true }) => {
   const ref = useRef(null);
-  const [dragging, setDragging] = useState(false);
+  const [dragging,     setDragging]     = useState(false);
+  const [driveLoading, setDriveLoading] = useState(false);
 
-  const blocked = quotaFull || !storageLoaded;
+  const blocked  = quotaFull || !storageLoaded;
+  const isLoading = !!uploading || driveLoading;
+  const statusLabel = driveLoading ? 'Importing from Drive…' : phase === 'compressing' ? 'Compressing…' : 'Uploading…';
 
   const handleDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    if (uploading || blocked) return;
+    e.preventDefault(); setDragging(false);
+    if (isLoading || blocked) return;
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
     if (files.length) onFiles(multiple ? files : [files[0]]);
   };
-
-  const handleDragOver = (e) => { e.preventDefault(); if (!uploading && !blocked) setDragging(true); };
+  const handleDragOver  = (e) => { e.preventDefault(); if (!isLoading && !blocked) setDragging(true); };
   const handleDragLeave = () => setDragging(false);
 
-  const isLoading = !!uploading;
-  const statusLabel = phase === 'compressing' ? 'Compressing…' : 'Uploading…';
+  const handleDrive = async (e) => {
+    e.stopPropagation();
+    if (isLoading || blocked) return;
+    setDriveLoading(true);
+    try {
+      await openDrivePicker((files) => { onFiles(multiple ? files : [files[0]]); });
+    } catch (err) { console.error('Drive error:', err); }
+    finally { setDriveLoading(false); }
+  };
 
   return (
     <>
       <input
-        ref={ref}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        multiple={multiple}
+        ref={ref} type="file" accept="image/*" className="hidden" multiple={multiple}
         onChange={e => { if (blocked) return; const files = Array.from(e.target.files); if (files.length) onFiles(files); e.target.value = ''; }}
       />
       <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
+        onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}
         onClick={() => !isLoading && !blocked && ref.current.click()}
         className={`mt-2 flex flex-col items-center justify-center gap-2 w-full py-7 rounded-2xl border-2 border-dashed transition-all select-none
           ${blocked ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60' :
@@ -115,6 +187,14 @@ const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true, quota
               </p>
               <p className="text-xs text-zinc-400 mt-0.5">or click to browse · JPG, PNG, WEBP, BMP, SVG, AVIF</p>
             </div>
+            {!quotaFull && (
+              <button
+                type="button" onClick={handleDrive}
+                className="mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-zinc-200 bg-white text-zinc-600 hover:border-zinc-400 transition-all active:scale-95"
+              >
+                <GoogleDriveIcon size={13} /> Google Drive
+              </button>
+            )}
           </>
         )}
       </div>
@@ -936,15 +1016,13 @@ export default function WebsiteCMS() {
     setPhotoUploading(type);
     const total = files.length;
     let running = await refreshStorage(userId);
+    let storageSkipped = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress({ phase: 'compressing', current: i + 1, total });
       try {
         const compressed = await imageCompression(file, COMPRESS_OPTS);
-        if (running + compressed.size > GB10) {
-          showToast('Storage limit reached (10 GB). Upload stopped.');
-          break;
-        }
+        if (running + compressed.size > GB10) { storageSkipped++; continue; }
         setUploadProgress({ phase: 'uploading', current: i + 1, total });
         const ext = file.name.split('.').pop();
         const storagePath = `site/banners/${type}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
@@ -967,7 +1045,9 @@ export default function WebsiteCMS() {
         }
       } catch (e) { showToast('Upload error'); console.error(e); }
     }
-    showToast(`${files.length} photo${files.length > 1 ? 's' : ''} uploaded!`);
+    const uploaded = files.length - storageSkipped;
+    const skipMsg  = storageSkipped > 0 ? ` · ${storageSkipped} skipped (storage full)` : '';
+    showToast(`${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded${skipMsg}`);
     setPhotoUploading('');
     clearProgress();
   };
@@ -1077,15 +1157,13 @@ export default function WebsiteCMS() {
     setPhotoUploading(`portfolio-${portfolioId}`);
     const total = files.length;
     let running = await refreshStorage(userId);
+    let storageSkipped = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress({ phase: 'compressing', current: i + 1, total });
       try {
         const compressed = await imageCompression(file, COMPRESS_OPTS);
-        if (running + compressed.size > GB10) {
-          showToast('Storage limit reached (10 GB). Upload stopped.');
-          break;
-        }
+        if (running + compressed.size > GB10) { storageSkipped++; continue; }
         setUploadProgress({ phase: 'uploading', current: i + 1, total });
         const ext = file.name.split('.').pop();
         const storagePath = `site/portfolio/${portfolioId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
@@ -1112,7 +1190,9 @@ export default function WebsiteCMS() {
         }
       } catch (e) { showToast('Upload error'); console.error(e); }
     }
-    showToast(`${files.length} photo${files.length > 1 ? 's' : ''} uploaded!`);
+    const uploaded = files.length - storageSkipped;
+    const skipMsg  = storageSkipped > 0 ? ` · ${storageSkipped} skipped (storage full)` : '';
+    showToast(`${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded${skipMsg}`);
     setPhotoUploading('');
     clearProgress();
   };
@@ -1137,15 +1217,13 @@ export default function WebsiteCMS() {
     setPhotoUploading('gallery');
     const total = files.length;
     let running = await refreshStorage(userId);
+    let storageSkipped = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress({ phase: 'compressing', current: i + 1, total });
       try {
         const compressed = await imageCompression(file, COMPRESS_OPTS);
-        if (running + compressed.size > GB10) {
-          showToast('Storage limit reached (10 GB). Upload stopped.');
-          break;
-        }
+        if (running + compressed.size > GB10) { storageSkipped++; continue; }
         setUploadProgress({ phase: 'uploading', current: i + 1, total });
         const ext = file.name.split('.').pop();
         const storagePath = `site/gallery/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
@@ -1163,7 +1241,9 @@ export default function WebsiteCMS() {
         } else showToast('DB insert failed');
       } catch (e) { showToast('Upload error'); console.error(e); }
     }
-    showToast(`${files.length} photo${files.length > 1 ? 's' : ''} uploaded!`);
+    const uploaded = files.length - storageSkipped;
+    const skipMsg  = storageSkipped > 0 ? ` · ${storageSkipped} skipped (storage full)` : '';
+    showToast(`${uploaded} photo${uploaded !== 1 ? 's' : ''} uploaded${skipMsg}`);
     setPhotoUploading('');
     clearProgress();
   };
