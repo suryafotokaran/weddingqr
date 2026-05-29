@@ -155,8 +155,14 @@ function GalleryForm({ data, onChange, userId, eventName }) {
 
   const handleUpload = async (i, file) => {
     if (!file) return;
+    const GB10 = 10 * 1024 * 1024 * 1024;
+    const { data: used } = await supabase.rpc('get_user_photo_storage', { p_user_id: userId });
+    if ((used ?? 0) + file.size > GB10) {
+      alert('Storage limit reached (10 GB). Please delete some files to free up space.');
+      return;
+    }
     const ext = file.name.split('.').pop();
-    const key = `${userId}/${eventName}/website-gallery/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const key = `${eventName}/website-gallery/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     try {
       await uploadToR2(file, key);
       const cmd = new GetObjectCommand({ Bucket: import.meta.env.VITE_R2_BUCKET, Key: key });

@@ -193,6 +193,7 @@ export default function EventDetail() {
   const [showGallery, setShowGallery] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null });
   const [photoCount, setPhotoCount] = useState(0);
+  const [eventPhotoCount, setEventPhotoCount] = useState(0);
   const [storageUsed, setStorageUsed] = useState(0);
 
   const GLOBAL_STORAGE_LIMIT = 10 * 1024 * 1024 * 1024; // 10GB
@@ -242,19 +243,41 @@ export default function EventDetail() {
       .from('photos')
       .select('*')
       .eq('event_id', id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(10000);
     const allPhArr = allPh ?? [];
     setAllPhotos(allPhArr);
     // Gallery only shows host-uploaded photos (source='host')
     setPhotos(allPhArr.filter(p => p.source === 'host' || (!p.source && p.user_id)));
 
-    // Fetch global usage
-    const [countRes, sizeRes] = await Promise.all([
+    // Fetch global usage (same sources as EventLanding)
+    const [countRes, sizeRes, bannersRes, portfolioPhotosRes, portfoliosRes, galleryRes, testimonialsRes, eventCountRes] = await Promise.all([
       supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
-      supabase.from('photos').select('size_bytes').eq('user_id', user.id),
+      supabase.rpc('get_user_photo_storage', { p_user_id: user.id }),
+      supabase.from('site_banners').select('size_bytes').limit(10000),
+      supabase.from('site_portfolio_photos').select('size_bytes').limit(10000),
+      supabase.from('site_portfolios').select('cover_size_bytes').limit(10000),
+      supabase.from('site_gallery_photos').select('size_bytes').limit(10000),
+      supabase.from('site_testimonials').select('photos_size_bytes').limit(10000),
+      supabase.rpc('get_event_photo_count', { p_event_id: id, p_source: 'host' }),
     ]);
     setPhotoCount(countRes.data ?? 0);
-    const totalSize = (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+    setEventPhotoCount(eventCountRes.data ?? 0);
+    const { data: allUserEvents } = await supabase.from('events').select('id').eq('user_id', user.id);
+    const userEventIds = (allUserEvents ?? []).map(e => e.id);
+    let websiteBuilder = 0;
+    if (userEventIds.length > 0) {
+      const { data: wbConfigs } = await supabase.from('website_configs').select('gallery_size_bytes').in('event_id', userEventIds);
+      websiteBuilder = (wbConfigs ?? []).reduce((acc, c) => acc + (c.gallery_size_bytes || 0), 0);
+    }
+    const totalSize =
+      (sizeRes.data ?? 0) +
+      (bannersRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+      (portfolioPhotosRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+      (portfoliosRes.data ?? []).reduce((acc, p) => acc + (p.cover_size_bytes || 0), 0) +
+      (galleryRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+      (testimonialsRes.data ?? []).reduce((acc, p) => acc + (p.photos_size_bytes || 0), 0) +
+      websiteBuilder;
     setStorageUsed(totalSize);
 
     if (isInitial) setLoading(false);
@@ -318,7 +341,7 @@ export default function EventDetail() {
       const ext = file.name.split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
       const folderName = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
-      const newPath = `${user.id}/${folderName}/photoselection/${fileName}`;
+      const newPath = `${folderName}/photoselection/${fileName}`;
       // Upload new file
       await uploadToR2(compressed, newPath);
       const newRefUrl = buildR2RefUrl(newPath);
@@ -366,16 +389,16 @@ export default function EventDetail() {
   const stageFiles = async (files) => {
     if (!user || !event || uploadState.phase !== 'idle') return;
 
-    if (Array.from(files).length > 1000) {
-      showToast('error', 'Too many photos', 'Maximum 1000 photos per upload. Please select up to 1000 at a time.');
-      return;
-    }
-
     const { allowed: allFiles, rejected } = filterAllowedFiles(Array.from(files));
     if (rejected.length > 0) {
       showToast('error', 'Unsupported Files', `${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped (not an image format).`);
     }
     if (!allFiles.length) return;
+
+    if (allFiles.length > 1000) {
+      showToast('error', 'Too many photos', 'Maximum 1000 photos per upload. Please select up to 1000 at a time.');
+      return;
+    }
 
     // Dedup only within Photo Selection photos (source='host')
     const uploadedNames = new Set(photos.map(p => p.file_name));
@@ -389,7 +412,7 @@ export default function EventDetail() {
     await startUpload(unique, dupes.length);
   };
 
-  // ── Upload: compress all → upload all ────────────────────────────────────
+  // ── Upload: compress one → upload one → free memory → next ─────────────────
   const startUpload = async (files, skipped = 0) => {
     if (!files?.length || !user || !event) return;
 
@@ -398,83 +421,65 @@ export default function EventDetail() {
     const maxMb = event.max_image_size_mb || 20;
     const skipNote = skipped > 0 ? ` · ${skipped} duplicate${skipped > 1 ? 's' : ''} skipped` : '';
 
-    // ── Phase 1: Compress ────────────────────────────────────────────────────
-    setToast({ type: 'loading', title: 'Compressing photos…', message: `0 of ${files.length} done${skipNote}` });
-    const compressedItems = [];
-    const compressStart = Date.now();
+    setToast({ type: 'loading', title: 'Uploading photos…', message: `0 of ${files.length} done${skipNote}` });
+    const uploadStart = Date.now();
+    let uploaded = 0;
+    let runningStorage = storageUsed;
+
     for (let i = 0; i < files.length; i++) {
       if (cancelUploadRef.current) { cancelled = true; break; }
       const file = files[i];
-      setUploadState({ phase: 'compressing', current: i + 1, total: files.length, percent: Math.round((i / files.length) * 100), message: file.name });
-      try {
-        const compressed = await imageCompression(file, getCompressionOptions(maxMb));
-        compressedItems.push({ file, compressed });
-      } catch {
-        compressedItems.push({ file, compressed: file });
-      }
-      setUploadState({ phase: 'compressing', current: i + 1, total: files.length, percent: Math.round(((i + 1) / files.length) * 100), message: file.name });
-      const elapsed = Date.now() - compressStart;
-      const eta = formatETA((elapsed / (i + 1)) * (files.length - i - 1));
-      setToast({ type: 'loading', title: 'Compressing photos…', message: `${i + 1} of ${files.length} done${eta ? ` · ${eta}` : ''}` });
-    }
 
-    if (cancelled) {
-      cancelUploadRef.current = false;
-      setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-      setSelectedFolderName(null);
-      return;
-    }
+      if (photos.some(p => p.file_name === file.name)) continue;
 
-    // ── Check quota using actual compressed size ──────────────────────────────
-    const compressedTotalSize = compressedItems.reduce((acc, item) => acc + item.compressed.size, 0);
-    if (storageUsed + compressedTotalSize > GLOBAL_STORAGE_LIMIT) {
-      setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
-      setToast(null);
-      setQuotaModal({ show: true, currentUsed: storageUsed, trying: compressedTotalSize });
-      return;
-    }
-
-    // ── Phase 2: Upload ──────────────────────────────────────────────────────
-    setToast({ type: 'loading', title: 'Uploading photos…', message: `0 of ${compressedItems.length} done` });
-    const uploadStart = Date.now();
-    let uploaded = 0;
-
-    for (let i = 0; i < compressedItems.length; i++) {
-      if (cancelUploadRef.current) { cancelled = true; break; }
-      const item = compressedItems[i];
-      setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round((i / compressedItems.length) * 100), message: item.file.name });
-
-      if (storageUsed + item.compressed.size > GLOBAL_STORAGE_LIMIT) {
-        showToast('error', 'Storage Full', 'Global storage limit reached.');
-        break;
-      }
-
-      if (photos.some(p => p.file_name === item.file.name)) continue;
+      setUploadState({ phase: 'uploading', current: i + 1, total: files.length, percent: Math.round((i / files.length) * 100), message: file.name });
 
       try {
-        const ext = item.file.name.split('.').pop();
+        // 1. Compress this photo only
+        let compressed;
+        try {
+          compressed = await imageCompression(file, getCompressionOptions(maxMb));
+        } catch {
+          compressed = file;
+        }
+
+        // 2. Check quota with actual compressed size
+        if (runningStorage + compressed.size > GLOBAL_STORAGE_LIMIT) {
+          setUploadState({ phase: 'idle', current: 0, total: 0, percent: 0, message: '' });
+          setToast(null);
+          setQuotaModal({ show: true, currentUsed: runningStorage, trying: compressed.size });
+          break;
+        }
+
+        // 3. Upload to R2
+        const ext = file.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
         const folderName = event.name ? event.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : event.id;
-        const storagePath = `${user.id}/${folderName}/photoselection/${fileName}`;
-        await uploadToR2(item.compressed, storagePath);
+        const storagePath = `${folderName}/photoselection/${fileName}`;
+        await uploadToR2(compressed, storagePath);
         const refUrl = buildR2RefUrl(storagePath);
+
+        // 4. Insert DB record
         const { error: dbErr } = await supabase.from('photos').insert({
           event_id: event.id,
           user_id: user.id,
           storage_path: storagePath,
-          file_name: item.file.name,
-          size_bytes: item.compressed.size,
+          file_name: file.name,
+          size_bytes: compressed.size,
           supabase_url: refUrl,
           source: 'host',
         });
         if (dbErr) throw new Error(dbErr.message);
+
+        runningStorage += compressed.size;
         uploaded++;
-        setUploadState({ phase: 'uploading', current: i + 1, total: compressedItems.length, percent: Math.round(((i + 1) / compressedItems.length) * 100), message: item.file.name });
-        const uploadElapsed = Date.now() - uploadStart;
-        const uploadEta = formatETA((uploadElapsed / uploaded) * (compressedItems.length - i - 1));
-        setToast({ type: 'loading', title: 'Uploading photos…', message: `${uploaded} of ${compressedItems.length} done${uploadEta ? ` · ${uploadEta}` : ''}` });
+        // compressed goes out of scope here — GC can free it
+        setUploadState({ phase: 'uploading', current: i + 1, total: files.length, percent: Math.round(((i + 1) / files.length) * 100), message: file.name });
+        const elapsed = Date.now() - uploadStart;
+        const eta = formatETA((elapsed / uploaded) * (files.length - i - 1));
+        setToast({ type: 'loading', title: 'Uploading photos…', message: `${uploaded} of ${files.length} done${eta ? ` · ${eta}` : ''}` });
       } catch (err) {
-        showToast('error', 'Upload failed', `Failed to upload ${item.file.name}: ${err.message}`);
+        showToast('error', 'Upload failed', `Failed to upload ${file.name}: ${err.message}`);
       }
     }
 
@@ -1005,7 +1010,7 @@ export default function EventDetail() {
                   <Images size={14} className="text-teal-600" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Photos</p>
                 </div>
-                <p className="text-2xl font-black text-zinc-900">{photos.length.toLocaleString()}</p>
+                <p className="text-2xl font-black text-zinc-900">{eventPhotoCount.toLocaleString()}</p>
                 <p className="text-[10px] text-zinc-400 mt-0.5">in this event</p>
               </div>
 

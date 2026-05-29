@@ -48,6 +48,87 @@ function fmtNum(n) {
 
 function pct(v, max) { return Math.min(100, (v / max) * 100); }
 
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+function SkeletonBlock({ className = '' }) {
+  return (
+    <div className={`relative overflow-hidden bg-zinc-200 rounded-xl ${className}`}>
+      <div className="absolute inset-0 skeleton-shimmer" />
+    </div>
+  );
+}
+
+function R2StorageSkeleton() {
+  return (
+    <DashboardLayout>
+      <div className="animate-pulse">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+          <div className="space-y-2">
+            <SkeletonBlock className="w-40 h-3" />
+            <SkeletonBlock className="w-64 h-8" />
+            <SkeletonBlock className="w-48 h-4" />
+          </div>
+          <SkeletonBlock className="w-28 h-10 rounded-xl" />
+        </div>
+
+        {/* Stat cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-2xl border border-zinc-100 px-5 py-5 flex flex-col gap-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <SkeletonBlock className="w-20 h-3" />
+                <SkeletonBlock className="w-8 h-8 rounded-xl" />
+              </div>
+              <SkeletonBlock className="w-24 h-7" />
+              <SkeletonBlock className="w-32 h-3" />
+            </div>
+          ))}
+        </div>
+
+        {/* Usage bars */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="bg-white rounded-2xl border border-zinc-100 shadow-sm px-5 py-4">
+              <div className="flex items-center justify-between mb-3">
+                <SkeletonBlock className="w-36 h-4" />
+                <SkeletonBlock className="w-12 h-6 rounded-full" />
+              </div>
+              <SkeletonBlock className="w-full h-2 rounded-full mb-2" />
+              <SkeletonBlock className="w-40 h-3" />
+            </div>
+          ))}
+        </div>
+
+        {/* Billing card */}
+        <div className="rounded-2xl border border-zinc-100 bg-white p-5 mb-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <SkeletonBlock className="w-10 h-10 rounded-xl" />
+              <div className="space-y-2">
+                <SkeletonBlock className="w-44 h-4" />
+                <SkeletonBlock className="w-56 h-3" />
+              </div>
+            </div>
+            <SkeletonBlock className="w-20 h-9" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="bg-zinc-50 rounded-xl px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <SkeletonBlock className="w-16 h-3" />
+                  <SkeletonBlock className="w-12 h-4" />
+                </div>
+                <SkeletonBlock className="w-24 h-3" />
+                <SkeletonBlock className="w-20 h-3" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 function StatCard({ label, value, sub, icon: Icon, accent = 'teal', loading }) {
   const colors = {
@@ -228,6 +309,9 @@ export default function R2Storage() {
   const isFree = totalCost === 0;
 
   const month = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  // Show skeleton on initial load (no data yet)
+  if (loading && !storageData && !error) return <R2StorageSkeleton />;
 
   return (
     <DashboardLayout>

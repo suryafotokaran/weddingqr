@@ -60,19 +60,21 @@ const SaveBtn = ({ onClick, saving }) => (
 
 // ── Top-level components (hooks used here, NOT inside render) ─────────────────
 
-const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true }) => {
+const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true, quotaFull = false, storageLoaded = true }) => {
   const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
+
+  const blocked = quotaFull || !storageLoaded;
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
-    if (uploading) return;
+    if (uploading || blocked) return;
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
     if (files.length) onFiles(multiple ? files : [files[0]]);
   };
 
-  const handleDragOver = (e) => { e.preventDefault(); if (!uploading) setDragging(true); };
+  const handleDragOver = (e) => { e.preventDefault(); if (!uploading && !blocked) setDragging(true); };
   const handleDragLeave = () => setDragging(false);
 
   const isLoading = !!uploading;
@@ -86,17 +88,18 @@ const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true }) => 
         accept="image/*"
         className="hidden"
         multiple={multiple}
-        onChange={e => { const files = Array.from(e.target.files); if (files.length) onFiles(files); e.target.value = ''; }}
+        onChange={e => { if (blocked) return; const files = Array.from(e.target.files); if (files.length) onFiles(files); e.target.value = ''; }}
       />
       <div
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        onClick={() => !isLoading && ref.current.click()}
-        className={`mt-2 flex flex-col items-center justify-center gap-2 w-full py-7 rounded-2xl border-2 border-dashed transition-all cursor-pointer select-none
-          ${isLoading ? 'opacity-60 cursor-not-allowed border-zinc-200 bg-zinc-50' :
-            dragging ? 'border-teal-400 bg-teal-50 scale-[1.01]' :
-            'border-zinc-300 bg-zinc-50 hover:border-teal-400 hover:bg-teal-50'}`}
+        onClick={() => !isLoading && !blocked && ref.current.click()}
+        className={`mt-2 flex flex-col items-center justify-center gap-2 w-full py-7 rounded-2xl border-2 border-dashed transition-all select-none
+          ${blocked ? 'border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-60' :
+            isLoading ? 'opacity-60 cursor-not-allowed border-zinc-200 bg-zinc-50' :
+            dragging ? 'border-teal-400 bg-teal-50 scale-[1.01] cursor-pointer' :
+            'border-zinc-300 bg-zinc-50 hover:border-teal-400 hover:bg-teal-50 cursor-pointer'}`}
       >
         {isLoading ? (
           <>
@@ -107,10 +110,10 @@ const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true }) => 
           <>
             <Upload size={22} className={dragging ? 'text-teal-500' : 'text-zinc-400'} />
             <div className="text-center">
-              <p className={`text-sm font-semibold ${dragging ? 'text-teal-600' : 'text-zinc-600'}`}>
-                {dragging ? 'Drop to upload' : `Drag & drop ${label.toLowerCase()} here`}
+              <p className="text-sm font-semibold text-zinc-600">
+                {quotaFull ? 'Quota reached — upgrade to upload more' : dragging ? 'Drop to upload' : `Drag & drop ${label.toLowerCase()} here`}
               </p>
-              <p className="text-xs text-zinc-400 mt-0.5">or <span className="text-teal-600 underline underline-offset-2">browse files</span></p>
+              <p className="text-xs text-zinc-400 mt-0.5">or click to browse · JPG, PNG, WEBP, BMP, SVG, AVIF</p>
             </div>
           </>
         )}
@@ -119,7 +122,7 @@ const ImgUploadBtn = ({ label, uploading, phase, onFiles, multiple = true }) => 
   );
 };
 
-const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete, onRename }) => {
+const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete, onRename, quotaFull = false }) => {
   const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -129,7 +132,7 @@ const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete, onRenam
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
-    if (uploading) return;
+    if (uploading || quotaFull) return;
     const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
     if (file) onCoverFiles([file]);
   };
@@ -144,13 +147,13 @@ const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete, onRenam
     <div
       className={`flex items-center gap-4 border-2 rounded-2xl p-4 transition-all ${dragging ? 'border-teal-400 bg-teal-50' : 'border-zinc-200 bg-zinc-50'}`}
       onDrop={handleDrop}
-      onDragOver={e => { e.preventDefault(); if (!uploading) setDragging(true); }}
+      onDragOver={e => { e.preventDefault(); if (!uploading && !quotaFull) setDragging(true); }}
       onDragLeave={() => setDragging(false)}
     >
       <div
-        className={`w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 relative group cursor-pointer border-2 transition-all ${dragging ? 'border-teal-400 scale-105' : 'border-transparent'}`}
-        onClick={() => !uploading && ref.current.click()}
-        title="Click or drag to change cover"
+        className={`w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 relative group border-2 transition-all ${quotaFull ? 'cursor-not-allowed opacity-60 border-transparent' : 'cursor-pointer ' + (dragging ? 'border-teal-400 scale-105' : 'border-transparent')}`}
+        onClick={() => !uploading && !quotaFull && ref.current.click()}
+        title={quotaFull ? 'Storage full' : 'Click or drag to change cover'}
       >
         {portfolio.cover_url
           ? <img src={portfolio.cover_url} alt={portfolio.name} className="w-full h-full object-cover" />
@@ -193,11 +196,11 @@ const CoverRow = ({ portfolio, uploading, phase, onCoverFiles, onDelete, onRenam
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={e => { if (e.target.files[0]) onCoverFiles([e.target.files[0]]); e.target.value = ''; }}
+          onChange={e => { if (quotaFull) return; if (e.target.files[0]) onCoverFiles([e.target.files[0]]); e.target.value = ''; }}
         />
         <button
-          disabled={!!uploading}
-          onClick={() => ref.current.click()}
+          disabled={!!uploading || quotaFull}
+          onClick={() => !quotaFull && ref.current.click()}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 border border-teal-200 hover:bg-teal-50 transition-colors disabled:opacity-50"
         >
           <Upload size={12} />
@@ -323,6 +326,8 @@ const PortfolioDetail = ({
   onTogglePhotoSelect,
   onSelectAllPhotos,
   onDeletePortfolioPhotosSelected,
+  quotaFull,
+  storageLoaded,
 }) => {
   const photos = portfolioPhotos.filter(p => p.portfolio_id === portfolio.id);
 
@@ -349,6 +354,8 @@ const PortfolioDetail = ({
         uploading={photoUploading === `portfolio-${portfolio.id}`}
         phase={phase}
         onFiles={files => onUploadPhoto(files, portfolio.id)}
+        quotaFull={quotaFull}
+        storageLoaded={storageLoaded}
       />
     </div>
   );
@@ -397,6 +404,8 @@ const PhotosPanel = ({
   onAddPortfolio,
   onUploadGallery,
   onDeleteGallery,
+  quotaFull = false,
+  storageLoaded = true,
 }) => {
   return (
     <div>
@@ -436,6 +445,8 @@ const PhotosPanel = ({
             uploading={photoUploading === 'desktop'}
             phase={phase}
             onFiles={files => onUploadBanner(files, 'desktop')}
+            quotaFull={quotaFull}
+            storageLoaded={storageLoaded}
           />
         </div>
       )}
@@ -457,6 +468,8 @@ const PhotosPanel = ({
             uploading={photoUploading === 'mobile'}
             phase={phase}
             onFiles={files => onUploadBanner(files, 'mobile')}
+            quotaFull={quotaFull}
+            storageLoaded={storageLoaded}
           />
         </div>
       )}
@@ -478,6 +491,7 @@ const PhotosPanel = ({
                   onCoverFiles={files => onUploadPortfolioCover(files, p.id)}
                   onDelete={onDeletePortfolio}
                   onRename={onRenamePortfolio}
+                  quotaFull={quotaFull}
                 />
                 <div className="px-4 pb-4">
                   <button
@@ -527,6 +541,8 @@ const PhotosPanel = ({
           onTogglePhotoSelect={onTogglePhotoSelect}
           onSelectAllPhotos={onSelectAllPhotos}
           onDeletePortfolioPhotosSelected={onDeletePortfolioPhotosSelected}
+          quotaFull={quotaFull}
+          storageLoaded={storageLoaded}
         />
       )}
 
@@ -549,6 +565,8 @@ const PhotosPanel = ({
             uploading={photoUploading === 'gallery'}
             phase={phase}
             onFiles={onUploadGallery}
+            quotaFull={quotaFull}
+            storageLoaded={storageLoaded}
           />
         </div>
       )}
@@ -681,6 +699,35 @@ export default function WebsiteCMS() {
   const [selectedPhotoIds,   setSelectedPhotoIds]   = useState(new Set());
   const clearProgress = () => setUploadProgress({ phase: '', current: 0, total: 0 });
   const [newPortfolioName,  setNewPortfolioName]  = useState('');
+  const [userId,            setUserId]            = useState('');
+  const [storageUsed,       setStorageUsed]       = useState(0);
+  const [storageLoaded,     setStorageLoaded]     = useState(false);
+
+  const GB10 = 10 * 1024 * 1024 * 1024;
+  // Returns TOTAL storage across all sources and updates state.
+  // Called before each batch upload to get a fresh running total.
+  const refreshStorage = async (uid) => {
+    if (!uid) return storageUsed; // fallback to current known value
+    const [photoRes, bannersRes, portfoliosRes2, portPhotosRes2, galleryRes2, testimonialsRes2, wbRes] = await Promise.all([
+      supabase.rpc('get_user_photo_storage', { p_user_id: uid }),
+      supabase.from('site_banners').select('size_bytes'),
+      supabase.from('site_portfolios').select('cover_size_bytes'),
+      supabase.from('site_portfolio_photos').select('size_bytes'),
+      supabase.from('site_gallery_photos').select('size_bytes'),
+      supabase.from('site_testimonials').select('photos_size_bytes'),
+      supabase.from('website_configs').select('gallery_size_bytes'),
+    ]);
+    const total =
+      (photoRes.data ?? 0) +
+      (bannersRes.data ?? []).reduce((s, b) => s + (b.size_bytes || 0), 0) +
+      (portfoliosRes2.data ?? []).reduce((s, p) => s + (p.cover_size_bytes || 0), 0) +
+      (portPhotosRes2.data ?? []).reduce((s, p) => s + (p.size_bytes || 0), 0) +
+      (galleryRes2.data ?? []).reduce((s, g) => s + (g.size_bytes || 0), 0) +
+      (testimonialsRes2.data ?? []).reduce((s, t) => s + (t.photos_size_bytes || 0), 0) +
+      (wbRes.data ?? []).reduce((s, c) => s + (c.gallery_size_bytes || 0), 0);
+    setStorageUsed(total);
+    return total;
+  };
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
@@ -688,6 +735,10 @@ export default function WebsiteCMS() {
   useEffect(() => {
     (async () => {
       setLoading(true);
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData?.user?.id;
+      if (uid) setUserId(uid);
+
       const [
         contentRes,
         servicesRes,
@@ -697,6 +748,8 @@ export default function WebsiteCMS() {
         portfoliosRes,
         portfolioPhotosRes,
         galleryRes,
+        photoStorageRes,
+        wbConfigsRes,
       ] = await Promise.all([
         supabase.from('site_content').select('section,key,value'),
         supabase.from('site_services').select('*').order('display_order'),
@@ -706,6 +759,8 @@ export default function WebsiteCMS() {
         supabase.from('site_portfolios').select('*').order('display_order'),
         supabase.from('site_portfolio_photos').select('*').order('display_order'),
         supabase.from('site_gallery_photos').select('*').order('display_order'),
+        uid ? supabase.rpc('get_user_photo_storage', { p_user_id: uid }) : Promise.resolve({ data: 0 }),
+        supabase.from('website_configs').select('gallery_size_bytes'),
       ]);
 
       if (!contentRes.error && contentRes.data) {
@@ -765,6 +820,18 @@ export default function WebsiteCMS() {
         );
         setPortfolios(signedPortfolios);
       }
+      // ── Compute total storage across ALL sources (same as EventDetail/Studio) ──
+      const photoStorage    = photoStorageRes.data ?? 0;
+      const bannerStorage   = [...(desktopRes.data ?? []), ...(mobileRes.data ?? [])].reduce((s, b) => s + (b.size_bytes || 0), 0);
+      const portCoverStorage = (portfoliosRes.data ?? []).reduce((s, p) => s + (p.cover_size_bytes || 0), 0);
+      const portPhotosStorage = (portfolioPhotosRes.data ?? []).reduce((s, p) => s + (p.size_bytes || 0), 0);
+      const galleryStorage  = (galleryRes.data ?? []).reduce((s, g) => s + (g.size_bytes || 0), 0);
+      const testimonialsStorage = (testimonialsRes.data ?? []).reduce((s, t) => s + (t.photos_size_bytes || 0), 0);
+      const wbStorage       = (wbConfigsRes.data ?? []).reduce((s, c) => s + (c.gallery_size_bytes || 0), 0);
+      const totalStorage    = photoStorage + bannerStorage + portCoverStorage + portPhotosStorage + galleryStorage + testimonialsStorage + wbStorage;
+      setStorageUsed(totalStorage);
+      setStorageLoaded(true);
+
       setLoading(false);
     })();
   }, []);
@@ -868,15 +935,21 @@ export default function WebsiteCMS() {
   const onUploadBanner = async (files, type) => {
     setPhotoUploading(type);
     const total = files.length;
+    let running = await refreshStorage(userId);
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress({ phase: 'compressing', current: i + 1, total });
       try {
         const compressed = await imageCompression(file, COMPRESS_OPTS);
+        if (running + compressed.size > GB10) {
+          showToast('Storage limit reached (10 GB). Upload stopped.');
+          break;
+        }
         setUploadProgress({ phase: 'uploading', current: i + 1, total });
         const ext = file.name.split('.').pop();
         const storagePath = `site/banners/${type}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
         await uploadToR2(compressed, storagePath);
+        running += compressed.size;
         const refUrl = buildR2RefUrl(storagePath);
         const nextOrder = (type === 'desktop' ? desktopBanners : mobileBanners).length + i;
         const { data, error } = await supabase
@@ -970,6 +1043,13 @@ export default function WebsiteCMS() {
       }
 
       const compressed = await imageCompression(file, COMPRESS_OPTS);
+      const currentUsed = await refreshStorage(userId);
+      if (currentUsed + compressed.size > GB10) {
+        showToast('Storage limit reached (10 GB). Cannot upload cover.');
+        setPhotoUploading('');
+        clearProgress();
+        return;
+      }
       setUploadProgress({ phase: 'uploading', current: 1, total: 1 });
       const ext = file.name.split('.').pop();
       const storagePath = `site/portfolio/${portfolioId}/cover_${Date.now()}.${ext}`;
@@ -996,15 +1076,21 @@ export default function WebsiteCMS() {
   const onUploadPortfolioPhoto = async (files, portfolioId) => {
     setPhotoUploading(`portfolio-${portfolioId}`);
     const total = files.length;
+    let running = await refreshStorage(userId);
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress({ phase: 'compressing', current: i + 1, total });
       try {
         const compressed = await imageCompression(file, COMPRESS_OPTS);
+        if (running + compressed.size > GB10) {
+          showToast('Storage limit reached (10 GB). Upload stopped.');
+          break;
+        }
         setUploadProgress({ phase: 'uploading', current: i + 1, total });
         const ext = file.name.split('.').pop();
         const storagePath = `site/portfolio/${portfolioId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
         await uploadToR2(compressed, storagePath);
+        running += compressed.size;
         const refUrl = buildR2RefUrl(storagePath);
         const nextOrder = portfolioPhotos.filter(p => p.portfolio_id === portfolioId).length + i;
         const { data, error } = await supabase
@@ -1050,15 +1136,21 @@ export default function WebsiteCMS() {
   const onUploadGallery = async (files) => {
     setPhotoUploading('gallery');
     const total = files.length;
+    let running = await refreshStorage(userId);
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setUploadProgress({ phase: 'compressing', current: i + 1, total });
       try {
         const compressed = await imageCompression(file, COMPRESS_OPTS);
+        if (running + compressed.size > GB10) {
+          showToast('Storage limit reached (10 GB). Upload stopped.');
+          break;
+        }
         setUploadProgress({ phase: 'uploading', current: i + 1, total });
         const ext = file.name.split('.').pop();
         const storagePath = `site/gallery/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
         await uploadToR2(compressed, storagePath);
+        running += compressed.size;
         const refUrl = buildR2RefUrl(storagePath);
         const { data, error } = await supabase
           .from('site_gallery_photos')
@@ -1405,6 +1497,8 @@ export default function WebsiteCMS() {
                 onAddPortfolio={onAddPortfolio}
                 onUploadGallery={onUploadGallery}
                 onDeleteGallery={onDeleteGallery}
+                quotaFull={storageUsed >= GB10}
+                storageLoaded={storageLoaded}
               />
             ) : panels[active]}
           </div>

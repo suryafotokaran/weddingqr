@@ -57,23 +57,24 @@ export default function EventLanding() {
         .single();
       setEvent(ev);
 
-      const { data: ph } = await supabase
-        .from('photos')
-        .select('storage_path, size_bytes')
-        .eq('event_id', id);
-      setPhotoCount((ph ?? []).length);
+      const [{ data: ph }, { data: eventCount }, { data: evStorage }] = await Promise.all([
+        supabase.from('photos').select('storage_path').eq('event_id', id).limit(10000),
+        supabase.rpc('get_event_photo_count', { p_event_id: id }),
+        supabase.rpc('get_event_photo_storage', { p_event_id: id }),
+      ]);
+      setPhotoCount(eventCount ?? 0);
       setStoragePaths((ph ?? []).map(p => p.storage_path).filter(Boolean));
-      setEventStorage((ph ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0));
+      setEventStorage(evStorage ?? 0);
 
       // Global storage for user (all sources)
       if (userId) {
         const [sizeRes, bannersRes, portfolioPhotosRes, portfoliosRes, galleryRes, testimonialsRes] = await Promise.all([
-          supabase.from('photos').select('size_bytes').eq('user_id', userId),
-          supabase.from('site_banners').select('size_bytes'),
-          supabase.from('site_portfolio_photos').select('size_bytes'),
-          supabase.from('site_portfolios').select('cover_size_bytes'),
-          supabase.from('site_gallery_photos').select('size_bytes'),
-          supabase.from('site_testimonials').select('photos_size_bytes'),
+          supabase.rpc('get_user_photo_storage', { p_user_id: userId }),
+          supabase.from('site_banners').select('size_bytes').limit(10000),
+          supabase.from('site_portfolio_photos').select('size_bytes').limit(10000),
+          supabase.from('site_portfolios').select('cover_size_bytes').limit(10000),
+          supabase.from('site_gallery_photos').select('size_bytes').limit(10000),
+          supabase.from('site_testimonials').select('photos_size_bytes').limit(10000),
         ]);
         const { data: allUserEvents } = await supabase.from('events').select('id').eq('user_id', userId);
         const userEventIds = (allUserEvents ?? []).map(e => e.id);
@@ -83,7 +84,7 @@ export default function EventLanding() {
           websiteBuilder = (wbConfigs ?? []).reduce((acc, c) => acc + (c.gallery_size_bytes || 0), 0);
         }
         const total =
-          (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
+          (sizeRes.data ?? 0) +
           (bannersRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
           (portfolioPhotosRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0) +
           (portfoliosRes.data ?? []).reduce((acc, p) => acc + (p.cover_size_bytes || 0), 0) +
@@ -153,15 +154,23 @@ export default function EventLanding() {
         closeConfirm();
         setIsDeleting(true);
         try {
-          // Collect website gallery image paths from website_configs
+          // Fetch ALL photo paths via RPC — bypasses Supabase max-rows limit
+          const { data: photoPathsData } = await supabase
+            .rpc('get_event_photo_paths', { p_event_id: id });
+          const photoPaths = photoPathsData ?? [];
+
+          // Collect website builder gallery paths from website_configs
           const { data: wc } = await supabase.from('website_configs').select('data').eq('event_id', id).maybeSingle();
           const websiteGalleryPaths = (wc?.data?.gallery?.items || [])
             .map(item => item.storage_path)
             .filter(Boolean);
 
-          const allPaths = [...storagePaths, ...websiteGalleryPaths];
+          const allPaths = [...photoPaths, ...websiteGalleryPaths];
           if (allPaths.length > 0) await deleteFromR2(allPaths);
+
+          // Delete all Supabase rows for this event
           await supabase.from('photos').delete().eq('event_id', id);
+          await supabase.from('website_configs').delete().eq('event_id', id);
           const { error } = await supabase.from('events').delete().eq('id', id);
           if (error) throw error;
           navigate('/admin/studio');

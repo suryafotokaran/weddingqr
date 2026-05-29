@@ -130,6 +130,72 @@ function StorageModal({ breakdown, total, limitGb, onClose }) {
   );
 }
 
+/* ── Skeleton ────────────────────────────────────────────────────────── */
+function Sk({ className }) {
+  return <div className={`animate-pulse rounded-xl bg-zinc-100 ${className}`} />;
+}
+
+function StudioSkeleton() {
+  return (
+    <DashboardLayout>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+        <div className="space-y-2">
+          <Sk className="h-3 w-36" />
+          <Sk className="h-8 w-64" />
+          <Sk className="h-3 w-44" />
+        </div>
+        <Sk className="h-10 w-44 rounded-xl" />
+      </div>
+
+      {/* Stat strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {[1,2,3,4].map(i => (
+          <div key={i} className="bg-white rounded-2xl border border-zinc-100 px-5 py-4 flex flex-col gap-3 shadow-sm">
+            <div className="flex items-center justify-between">
+              <Sk className="h-2.5 w-24" />
+              <Sk className="h-7 w-7 rounded-lg" />
+            </div>
+            <Sk className="h-7 w-20" />
+          </div>
+        ))}
+      </div>
+
+      {/* Storage bar */}
+      <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm px-5 py-4 mb-6 flex items-center gap-4">
+        <Sk className="h-9 w-9 rounded-xl shrink-0" />
+        <div className="flex-1 space-y-2">
+          <div className="flex items-center justify-between">
+            <Sk className="h-3 w-32" />
+            <Sk className="h-5 w-12 rounded-full" />
+          </div>
+          <Sk className="h-2 w-full rounded-full" />
+        </div>
+      </div>
+
+      {/* Recent events */}
+      <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden mb-6">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-50">
+          <Sk className="h-4 w-28" />
+          <Sk className="h-3 w-16" />
+        </div>
+        <div className="p-5 space-y-3">
+          {[1,2,3].map(i => (
+            <div key={i} className="flex items-center gap-3">
+              <Sk className="h-10 w-10 rounded-xl shrink-0" />
+              <div className="flex-1 space-y-2">
+                <Sk className="h-3.5 w-40" />
+                <Sk className="h-2.5 w-28" />
+              </div>
+              <Sk className="h-5 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
+
 /* ── Main Page ───────────────────────────────────────────────────────── */
 export default function Studio() {
   const navigate = useNavigate();
@@ -155,18 +221,18 @@ export default function Studio() {
       const [evRes, countRes, sizeRes, bannersRes, portfolioPhotosRes, portfoliosRes, galleryRes, testimonialsRes] = await Promise.all([
         supabase.from('events').select('id,name,type,date,created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
         supabase.rpc('get_user_photo_count', { p_user_id: user.id }),
-        supabase.from('photos').select('size_bytes').eq('user_id', user.id),
-        supabase.from('site_banners').select('size_bytes'),
-        supabase.from('site_portfolio_photos').select('size_bytes'),
-        supabase.from('site_portfolios').select('cover_size_bytes'),
-        supabase.from('site_gallery_photos').select('size_bytes'),
-        supabase.from('site_testimonials').select('photos_size_bytes'),
+        supabase.rpc('get_user_photo_storage', { p_user_id: user.id }),
+        supabase.from('site_banners').select('size_bytes').limit(10000),
+        supabase.from('site_portfolio_photos').select('size_bytes').limit(10000),
+        supabase.from('site_portfolios').select('cover_size_bytes').limit(10000),
+        supabase.from('site_gallery_photos').select('size_bytes').limit(10000),
+        supabase.from('site_testimonials').select('photos_size_bytes').limit(10000),
       ]);
 
       setEvents(evRes.data ?? []);
       setPhotoCount(countRes.data ?? 0);
 
-      const eventPhotos     = (sizeRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+      const eventPhotos     = sizeRes.data ?? 0;
       const siteBanners     = (bannersRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
       const portfolioPhotos = (portfolioPhotosRes.data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0)
                             + (portfoliosRes.data ?? []).reduce((acc, p) => acc + (p.cover_size_bytes || 0), 0);
@@ -185,12 +251,12 @@ export default function Studio() {
         // Per-event storage for Recent Events display
         const perEventResults = await Promise.all(
           (evRes.data ?? []).map(e =>
-            supabase.from('photos').select('size_bytes').eq('event_id', e.id)
+            supabase.rpc('get_event_photo_storage', { p_event_id: e.id })
           )
         );
         const storages = {};
         (evRes.data ?? []).forEach((e, i) => {
-          storages[e.id] = (perEventResults[i].data ?? []).reduce((acc, p) => acc + (p.size_bytes || 0), 0);
+          storages[e.id] = perEventResults[i].data ?? 0;
         });
         setEventStorages(storages);
       }
@@ -206,6 +272,8 @@ export default function Studio() {
   const GLOBAL_STORAGE_LIMIT = storageLimitGb * GB;
   const storagePercent    = Math.min(100, (storageUsed / GLOBAL_STORAGE_LIMIT) * 100);
   const firstName         = fullName.split(' ')[0];
+
+  if (loading) return <StudioSkeleton />;
 
   return (
     <DashboardLayout>
@@ -227,7 +295,7 @@ export default function Studio() {
             {getGreeting()}, {firstName}.
           </h1>
           <p className="text-sm text-zinc-400 mt-1 font-medium">
-            {loading ? 'Loading…' : `${events.length} event${events.length !== 1 ? 's' : ''} · ${photoCount.toLocaleString()} photos`}
+            {`${events.length} event${events.length !== 1 ? 's' : ''} · ${photoCount.toLocaleString()} photos`}
           </p>
         </div>
         <button
@@ -243,10 +311,10 @@ export default function Studio() {
       {/* ── 4-up Stat Strip ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Events Created',  value: loading ? '—' : events.length,                    icon: CalendarDays, onClick: null },
-          { label: 'Photos Uploaded', value: loading ? '—' : photoCount.toLocaleString(),      icon: Camera,       onClick: null },
-          { label: 'Storage Used',    value: loading ? '—' : formatBytes(storageUsed),         icon: HardDrive,    onClick: () => setShowStorage(true) },
-          { label: 'Capacity Used',   value: loading ? '—' : `${storagePercent.toFixed(1)}%`,  icon: HardDrive,    onClick: null },
+          { label: 'Events Created',  value: events.length,                    icon: CalendarDays, onClick: null },
+          { label: 'Photos Uploaded', value: photoCount.toLocaleString(),      icon: Camera,       onClick: null },
+          { label: 'Storage Used',    value: formatBytes(storageUsed),         icon: HardDrive,    onClick: () => setShowStorage(true) },
+          { label: 'Capacity Used',   value: `${storagePercent.toFixed(1)}%`,  icon: HardDrive,    onClick: null },
         ].map(({ label, value, icon: Icon, onClick }) => (
           <div
             key={label}
@@ -285,7 +353,7 @@ export default function Studio() {
             </span>
           </div>
           <div className="h-2 bg-zinc-100 rounded-full overflow-hidden flex gap-0.5">
-            {!loading && [
+            {[
               { bytes: breakdown.eventPhotos,    color: 'bg-teal-500'   },
               { bytes: breakdown.portfolioPhotos, color: 'bg-violet-500' },
               { bytes: breakdown.siteGallery,    color: 'bg-blue-500'   },
@@ -299,9 +367,6 @@ export default function Studio() {
                 style={{ width: `${Math.max((s.bytes / GLOBAL_STORAGE_LIMIT) * 100, 0.3)}%` }}
               />
             ))}
-            {loading && (
-              <div className="h-full bg-teal-600 rounded-full transition-all duration-700" style={{ width: `${Math.max(storagePercent, 0.4)}%` }} />
-            )}
           </div>
         </div>
       </div>
@@ -318,13 +383,7 @@ export default function Studio() {
           </button>
         </div>
 
-        {loading ? (
-          <div className="p-5 space-y-3">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-14 bg-zinc-50 rounded-xl animate-pulse" />
-            ))}
-          </div>
-        ) : events.length === 0 ? (
+        {events.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
             <div className="w-14 h-14 rounded-2xl bg-zinc-50 flex items-center justify-center mb-4">
               <FolderOpen size={24} className="text-zinc-300" />
@@ -356,7 +415,7 @@ export default function Studio() {
                     <span className="flex items-center gap-1"><CalendarDays size={10} />{formatDate(event.date)}</span>
                   </div>
                 </div>
-                {!loading && eventStorages[event.id] != null && (
+                {eventStorages[event.id] != null && (
                   <span className="flex items-center gap-1 text-[10px] font-semibold text-zinc-400 bg-zinc-50 border border-zinc-100 px-2 py-0.5 rounded-full shrink-0 mr-1">
                     <HardDrive size={9} className="text-teal-500" />
                     {formatBytes(eventStorages[event.id])}

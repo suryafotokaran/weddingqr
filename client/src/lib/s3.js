@@ -78,19 +78,23 @@ export async function getSignedPhotoUrls(photos) {
 /**
  * Delete one or more objects from R2.
  * storagePaths = array of S3 keys (storage_path values from DB)
+ * Batches into chunks of 1000 (S3 DeleteObjects hard limit).
  */
 export async function deleteFromR2(storagePaths) {
   if (!storagePaths.length) return;
 
-  const command = new DeleteObjectsCommand({
-    Bucket: BUCKET,
-    Delete: {
-      Objects: storagePaths.map((Key) => ({ Key })),
-      Quiet:   true,
-    },
-  });
-
-  await s3Client.send(command);
+  const CHUNK = 1000;
+  for (let i = 0; i < storagePaths.length; i += CHUNK) {
+    const batch = storagePaths.slice(i, i + CHUNK);
+    const command = new DeleteObjectsCommand({
+      Bucket: BUCKET,
+      Delete: {
+        Objects: batch.map((Key) => ({ Key })),
+        Quiet:   true,
+      },
+    });
+    await s3Client.send(command);
+  }
 }
 
 /**

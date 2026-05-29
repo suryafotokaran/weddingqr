@@ -18,9 +18,13 @@ export default function SubmitReview() {
   const [error,      setError]      = useState('');
   const fileRef = useRef(null);
 
+  const MAX_REVIEW_PHOTOS = 5;
+
   const handlePhotos = (e) => {
     const files = Array.from(e.target.files);
-    const previews = files.map(file => ({ file, preview: URL.createObjectURL(file) }));
+    const remaining = MAX_REVIEW_PHOTOS - photos.length;
+    if (remaining <= 0) return;
+    const previews = files.slice(0, remaining).map(file => ({ file, preview: URL.createObjectURL(file) }));
     setPhotos(prev => [...prev, ...previews]);
     e.target.value = '';
   };
