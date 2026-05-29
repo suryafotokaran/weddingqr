@@ -16,19 +16,6 @@ import {
 } from 'lucide-react';
 import { filterAllowedFiles } from '../lib/previewGenerator';
 
-function GoogleDriveIcon({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
-      <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
-      <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
-      <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
-      <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
-      <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
-      <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 27h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
-    </svg>
-  );
-}
-
 const getCompressionOptions = (maxMb) => ({
   maxSizeMB: Math.min(maxMb, 0.5),
   maxWidthOrHeight: 3840,
@@ -218,7 +205,6 @@ export default function EventDetail() {
   const [signedUrls, setSignedUrls] = useState({});
   const fileInputRef  = useRef(null);
   const cancelUploadRef = useRef(false);
-  const stageFilesRef = useRef(null);
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -425,8 +411,6 @@ export default function EventDetail() {
     }
     await startUpload(unique, dupes.length);
   };
-  stageFilesRef.current = stageFiles; // keep ref fresh every render
-
   // ── Upload: compress one → upload one → free memory → next ─────────────────
   const startUpload = async (files, skipped = 0) => {
     if (!files?.length || !user || !event) return;
@@ -559,9 +543,7 @@ export default function EventDetail() {
   const handleFilePick = (e) => { stageFiles(Array.from(e.target.files)); e.target.value = ''; };
 
   const folderInputRef  = useRef(null);
-  const googleTokenRef  = useRef(null);
   const [selectedFolderName, setSelectedFolderName] = useState(null);
-  const [driveLoading,       setDriveLoading]        = useState(false);
 
   const handleFolderPick = async () => {
     if ('showDirectoryPicker' in window) {
@@ -585,108 +567,6 @@ export default function EventDetail() {
       folderInputRef.current?.click();
     }
   };
-
-  const loadGoogleScripts = useCallback(() => {
-    return new Promise((resolve) => {
-      if (window.gapi && window.google?.accounts) { resolve(); return; }
-      const gapiScript = document.createElement('script');
-      gapiScript.src = 'https://apis.google.com/js/api.js';
-      gapiScript.onload = () => {
-        window.gapi.load('picker', () => {
-          if (window.google?.accounts) { resolve(); return; }
-          const gisScript = document.createElement('script');
-          gisScript.src = 'https://accounts.google.com/gsi/client';
-          gisScript.onload = resolve;
-          document.head.appendChild(gisScript);
-        });
-      };
-      document.head.appendChild(gapiScript);
-    });
-  }, []);
-
-  const openGoogleDrivePicker = useCallback(async () => {
-    const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    const API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY;
-    if (!CLIENT_ID || !API_KEY) {
-      alert('Google Drive is not configured. Add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to .env.local.');
-      return;
-    }
-    setDriveLoading(true);
-    try {
-      await loadGoogleScripts();
-      const accessToken = await new Promise((resolve, reject) => {
-        const tokenClient = window.google.accounts.oauth2.initTokenClient({
-          client_id: CLIENT_ID,
-          scope:     'https://www.googleapis.com/auth/drive.readonly',
-          callback:  (response) => {
-            if (response.error) reject(new Error(response.error));
-            else resolve(response.access_token);
-          },
-        });
-        tokenClient.requestAccessToken({ prompt: googleTokenRef.current ? '' : 'consent' });
-      });
-      googleTokenRef.current = accessToken;
-
-      const mimeToExt = {
-        'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
-        'image/webp': 'webp', 'image/bmp': 'bmp', 'image/avif': 'avif',
-        'image/svg+xml': 'svg', 'image/gif': 'jpg',
-      };
-
-      const imageView = new window.google.picker.DocsView()
-        .setMimeTypes('image/jpeg,image/png,image/webp,image/bmp,image/avif,image/svg+xml')
-        .setIncludeFolders(false);
-
-      const picker = new window.google.picker.PickerBuilder()
-        .addView(imageView)
-        .setOAuthToken(accessToken)
-        .setDeveloperKey(API_KEY)
-        .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
-        .setTitle('Select photos from Google Drive')
-        .setCallback(async (data) => {
-          if (data.action === window.google.picker.Action.PICKED) {
-            setDriveLoading(true);
-            const docs = data[window.google.picker.Response.DOCUMENTS];
-            try {
-              const files = await Promise.all(
-                docs.map(async (doc) => {
-                  const fileId   = doc[window.google.picker.Document.ID];
-                  let   fileName = doc[window.google.picker.Document.NAME];
-                  const mimeType = doc[window.google.picker.Document.MIME_TYPE] || 'image/jpeg';
-                  const res = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-                    { headers: { Authorization: `Bearer ${accessToken}` } },
-                  );
-                  if (!res.ok) throw new Error(`Failed to download ${fileName}`);
-                  const blob = await res.blob();
-                  const currentExt = (fileName.split('.').pop() || '').toLowerCase();
-                  const safeExt    = mimeToExt[mimeType];
-                  if (safeExt && !['jpg','jpeg','png','webp','bmp','svg','avif'].includes(currentExt)) {
-                    fileName = fileName.replace(/\.[^.]+$/, '') + '.' + safeExt;
-                  }
-                  const safeMime = mimeType === 'image/gif' ? 'image/jpeg' : mimeType;
-                  return new File([blob], fileName, { type: safeMime });
-                }),
-              );
-              stageFilesRef.current?.(files);
-            } catch (err) {
-              console.error('Drive download error:', err);
-            } finally {
-              setDriveLoading(false);
-            }
-          } else if (data.action === window.google.picker.Action.CANCEL) {
-            setDriveLoading(false);
-          }
-        })
-        .build();
-
-      picker.setVisible(true);
-      setDriveLoading(false);
-    } catch (err) {
-      console.error('Google Drive picker error:', err);
-      setDriveLoading(false);
-    }
-  }, [loadGoogleScripts]);
 
   const handleUnlockGuest = async (submissionId) => {
     await supabase.from('guest_submissions').update({ is_locked: false }).eq('id', submissionId);
@@ -1388,18 +1268,6 @@ export default function EventDetail() {
                 >
                   <FolderOpen size={14} className="shrink-0" />
                   <span className="truncate">{selectedFolderName ?? 'Select Folder'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={openGoogleDrivePicker}
-                  disabled={uploadState.phase !== 'idle' || driveLoading}
-                  className="px-4 py-2.5 rounded-xl text-sm font-semibold border-2 border-zinc-200 text-zinc-700 bg-white hover:border-zinc-400 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
-                >
-                  {driveLoading
-                    ? <Loader2 size={14} className="animate-spin text-zinc-500" />
-                    : <GoogleDriveIcon size={14} />
-                  }
-                  Google Drive
                 </button>
               </div>
             )}
