@@ -6,7 +6,7 @@ const LocationPage = ({ city, district }) => {
   const slug = city.toLowerCase().replace(/\s+/g, '-');
 
   const title = `Fotokaran Studio | Best Photo Studio in ${city} | Wedding Photographer ${city}`;
-  const description = `Fotokaran Studio – Best photo studio serving ${city}, ${districtLabel}. Professional wedding, candid & pre-wedding photography. Capturing your precious moments in ${city} and nearby areas. Call: 8489193088`;
+  const description = `Fotokaran Studio – Best photo studio based in Veeravanallur, Tirunelveli, serving ${city} and surrounding areas. Professional wedding, candid & pre-wedding photography in ${city}. Call: 8489193088`;
   const canonical = `https://www.fotokaranstudio.com/${slug}`;
 
   const keywords = [

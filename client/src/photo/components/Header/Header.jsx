@@ -126,7 +126,7 @@ const Header = ({ locationCity }) => {
                 textShadow: "0 1px 6px rgba(0,0,0,0.6)",
               }}
             >
-              Serving {locationCity} &amp; nearby areas · Call: 8489193088
+              Based in Veeravanallur, Tirunelveli · Serving {locationCity} &amp; surrounding areas · Call: 8489193088
             </p>
           </div>
         </div>
