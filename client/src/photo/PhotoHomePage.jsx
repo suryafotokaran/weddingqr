@@ -9,7 +9,7 @@ import Instagram from "./components/Instagram/Instagram";
 import Footer from "./components/Footer/Footer";
 import "./photo.css";
 
-const PhotoHomePage = () => {
+const PhotoHomePage = ({ locationCity }) => {
   useEffect(() => {
     const menuBtn = document.getElementById("menu-btn");
     const navLinks = document.getElementById("nav-links");
@@ -58,7 +58,9 @@ const PhotoHomePage = () => {
   return (
     <>
       <h1 style={{ position: "absolute", width: "1px", height: "1px", padding: 0, margin: "-1px", overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0 }}>
-        Fotokaran Studio – Best Photo Studio in Tirunelveli | Wedding &amp; Candid Photographer
+        {locationCity
+          ? `Fotokaran Studio – Best Photo Studio in ${locationCity} | Wedding & Candid Photographer`
+          : "Fotokaran Studio – Best Photo Studio in Tirunelveli | Wedding & Candid Photographer"}
       </h1>
       <Header />
       <Portfolio />

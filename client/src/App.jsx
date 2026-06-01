@@ -29,8 +29,21 @@ import FullGallery from './photo/pages/FullGallery';
 import CategoriesPage from './photo/pages/CategoriesPage';
 import CategoryPhotosPage from './photo/pages/CategoryPhotosPage';
 import DynamicCategoryPage from './photo/pages/DynamicCategoryPage';
+import LocationPage from './photo/pages/LocationPage';
 import ScrollToTop from './photo/components/ScrollToTop';
 import FloatingButtons from './photo/components/FloatingButtons/FloatingButtons';
+
+// Tirunelveli District locations
+const TIRUNELVELI_CITIES = [
+  'Tirunelveli','Palayamkottai','Melapalayam','Nanguneri','Valliyur',
+  'Thisayanvilai','Radhapuram','Ambasamudram','Cheranmahadevi','Veeravanallur',
+  'Kallidaikurichi','Alangulam','Manur','Mukkudal','Puthukkudi','Velanguli',
+];
+// Kanyakumari District locations
+const KANYAKUMARI_CITIES = [
+  'Nagercoil','Kanyakumari','Marthandam','Kuzhithurai','Colachel',
+  'Padmanabhapuram','Thuckalay','Kulasekaram','Arumanai','Boothapandi','Suchindram',
+];
 
 function AppContent() {
   const location = useLocation();
@@ -53,6 +66,22 @@ function AppContent() {
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/category/:categoryId" element={<CategoryPhotosPage />} />
           <Route path="/portfolio/:portfolioId" element={<DynamicCategoryPage />} />
+          {/* Tirunelveli District location SEO pages */}
+          {TIRUNELVELI_CITIES.map(city => (
+            <Route
+              key={city}
+              path={`/${city.toLowerCase().replace(/\s+/g, '-')}`}
+              element={<LocationPage city={city} district="Tirunelveli" />}
+            />
+          ))}
+          {/* Kanyakumari District location SEO pages */}
+          {KANYAKUMARI_CITIES.map(city => (
+            <Route
+              key={city}
+              path={`/${city.toLowerCase().replace(/\s+/g, '-')}`}
+              element={<LocationPage city={city} district="Kanyakumari" />}
+            />
+          ))}
         </Route>
 
         {/* Auth */}
