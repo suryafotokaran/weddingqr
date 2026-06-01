@@ -5,7 +5,7 @@ import { usePhoto } from "../../context/PhotoContext";
 import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 
-const Header = () => {
+const Header = ({ locationCity }) => {
   const [currentImage, setCurrentImage] = useState(0);
   const [progress, setProgress] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
@@ -95,6 +95,40 @@ const Header = () => {
               />
             </button>
           ))}
+        </div>
+      )}
+
+      {locationCity && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"
+          style={{ paddingTop: "120px" }}
+        >
+          <div className="text-center px-6 max-w-3xl">
+            <h1
+              style={{
+                fontFamily: "Merriweather, serif",
+                color: "#fff",
+                fontSize: "clamp(1.4rem, 3.5vw, 2.5rem)",
+                fontWeight: 700,
+                lineHeight: 1.35,
+                textShadow: "0 2px 12px rgba(0,0,0,0.7)",
+                margin: 0,
+              }}
+            >
+              Professional Wedding &amp; Candid Photography Studio in {locationCity}
+            </h1>
+            <p
+              style={{
+                color: "rgba(255,255,255,0.82)",
+                fontSize: "clamp(0.95rem, 2vw, 1.15rem)",
+                marginTop: "14px",
+                fontFamily: "Montserrat, sans-serif",
+                textShadow: "0 1px 6px rgba(0,0,0,0.6)",
+              }}
+            >
+              Serving {locationCity} &amp; nearby areas · Call: 8489193088
+            </p>
+          </div>
         </div>
       )}
 
