@@ -28,11 +28,11 @@ const Field = ({ label, value, onChange, textarea = false, placeholder = '' }) =
     </label>
     {textarea ? (
       <textarea
-        rows={3}
+        rows={5}
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm text-zinc-800 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none bg-zinc-50"
+        className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm text-zinc-800 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-zinc-50"
       />
     ) : (
       <input
@@ -1428,9 +1428,29 @@ export default function WebsiteCMS() {
           <h1 className="text-2xl font-bold text-zinc-900">Website Content</h1>
         </div>
 
-        <div className="flex gap-6" style={{ height: 'calc(100vh - 13rem)' }}>
-          {/* Left nav — sticky */}
-          <aside className="w-56 flex-shrink-0 sticky top-0 self-start">
+        {/* Mobile horizontal tab bar */}
+        <div className="lg:hidden flex overflow-x-auto gap-1 mb-4 bg-zinc-100 p-1 rounded-xl">
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            const isActive = active === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActive(item.id)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex-shrink-0 ${
+                  isActive ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+              >
+                <Icon size={14} className={isActive ? 'text-teal-600' : ''} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-13rem)]">
+          {/* Left nav — desktop only, sticky */}
+          <aside className="hidden lg:block w-56 flex-shrink-0 sticky top-0 self-start">
             <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden flex flex-col">
               {NAV.map((item) => {
                 const Icon = item.icon;
@@ -1454,7 +1474,7 @@ export default function WebsiteCMS() {
           </aside>
 
           {/* Right panel — scrollable */}
-          <div className="flex-1 bg-white rounded-2xl border border-zinc-100 shadow-sm p-8 overflow-y-auto">
+          <div className="flex-1 bg-white rounded-2xl border border-zinc-100 shadow-sm p-4 sm:p-8 overflow-y-auto">
             {loading ? SECTION_SKELETON[active] ?? SECTION_SKELETON.about : active === 'photos' ? (
               <PhotosPanel
                 desktopBanners={desktopBanners}

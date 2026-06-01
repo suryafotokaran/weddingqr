@@ -786,7 +786,7 @@ export default function QRUpload() {
               <p className="text-sm text-zinc-500 mt-1">Images are automatically compressed before upload</p>
             </div>
             {!quotaFull && (
-              <div className="flex flex-wrap gap-3" onClick={e => e.stopPropagation()}>
+              <div className="flex flex-wrap gap-3 justify-center" onClick={e => e.stopPropagation()}>
                 <button
                   type="button"
                   disabled={uploadState.phase !== 'idle'}

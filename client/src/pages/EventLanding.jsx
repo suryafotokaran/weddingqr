@@ -222,9 +222,9 @@ export default function EventLanding() {
 
             <div className="flex gap-3 items-stretch">
               {/* Event storage pill */}
-              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[160px]">
+              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 sm:px-5 py-3 shadow-sm flex flex-col justify-center min-w-[120px]">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400 mb-1">This Event</p>
-                <p className="text-2xl font-bold text-zinc-900 leading-none">{formatBytes(eventStorage)}</p>
+                <p className="text-lg sm:text-2xl font-bold text-zinc-900 leading-none">{formatBytes(eventStorage)}</p>
                 <p className="text-[11px] text-zinc-400 mt-1">{photoCount} photo{photoCount !== 1 ? 's' : ''}</p>
               </div>
 
@@ -234,13 +234,13 @@ export default function EventLanding() {
                 const isFull  = storageUsed >= GLOBAL_STORAGE_LIMIT;
                 const isWarn  = percent >= 90 && !isFull;
                 return (
-                  <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3 shadow-sm flex flex-col justify-center min-w-[170px]">
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 sm:px-5 py-3 shadow-sm flex flex-col justify-center min-w-[120px]">
                     <div className="flex items-center gap-1.5 mb-1">
                       <Images size={12} className={isFull ? 'text-red-500' : isWarn ? 'text-amber-500' : 'text-teal-600'} />
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">Global Storage</p>
                     </div>
                     <div className="flex items-baseline gap-1">
-                      <p className={`text-2xl font-bold leading-none ${isFull ? 'text-red-600' : 'text-zinc-900'}`}>{formatBytes(storageUsed)}</p>
+                      <p className={`text-lg sm:text-2xl font-bold leading-none ${isFull ? 'text-red-600' : 'text-zinc-900'}`}>{formatBytes(storageUsed)}</p>
                       <p className="text-[11px] text-zinc-400">/ 10 GB</p>
                     </div>
                     <div className="mt-2 h-1 bg-zinc-200 rounded-full overflow-hidden">

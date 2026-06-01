@@ -847,12 +847,12 @@ export default function EventManagement() {
       <div className="max-w-5xl mx-auto py-6">
 
         {/* Page header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <p className="text-amber-700 font-bold tracking-[0.05em] text-[10px] uppercase mb-1">Studio</p>
-            <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900">Event Management</h1>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-900">Event Management</h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <button
               onClick={() => setShowPkgManager(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-zinc-200 text-zinc-700 bg-white hover:bg-zinc-50 transition-colors active:scale-95"

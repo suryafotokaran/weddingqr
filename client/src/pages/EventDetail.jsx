@@ -1169,9 +1169,9 @@ export default function EventDetail() {
 
         {/* Selection Limit */}
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-6 border border-zinc-50 mb-6">
-          <div className="flex items-start justify-between gap-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
+              <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
                 <Heart size={16} />
               </div>
               <div>
@@ -1251,7 +1251,7 @@ export default function EventDetail() {
               <p className="text-sm text-zinc-500 mt-1">or click to browse · JPG, PNG, WEBP, BMP, SVG, AVIF</p>
             </div>
             {!quotaFull && (
-              <div className="flex flex-wrap gap-3" onClick={e => e.stopPropagation()}>
+              <div className="flex flex-wrap gap-3 justify-center" onClick={e => e.stopPropagation()}>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -1460,17 +1460,17 @@ export default function EventDetail() {
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(26,28,28,0.04)] p-7">
 
           {/* Tabs */}
-          <div className="flex items-center gap-6 border-b border-zinc-100 mb-8">
+          <div className="flex items-center gap-3 sm:gap-6 border-b border-zinc-100 mb-8 overflow-x-auto">
             <button
               onClick={() => setActiveTab('all')}
-              className={`pb-4 text-sm font-bold transition-all relative ${activeTab === 'all' ? 'text-teal-600' : 'text-zinc-400 hover:text-zinc-600'}`}
+              className={`pb-4 text-xs sm:text-sm font-bold transition-all relative whitespace-nowrap ${activeTab === 'all' ? 'text-teal-600' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
               All Photos
               {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-teal-600 rounded-full" />}
             </button>
             <button
               onClick={() => setActiveTab('selected')}
-              className={`pb-4 text-sm font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'selected' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
+              className={`pb-4 text-xs sm:text-sm font-bold transition-all relative flex items-center gap-1.5 whitespace-nowrap ${activeTab === 'selected' ? 'text-pink-500' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
               Guest Selections
               <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'selected' ? 'bg-pink-100 text-pink-600' : 'bg-zinc-100 text-zinc-400'}`}>
@@ -1480,7 +1480,7 @@ export default function EventDetail() {
             </button>
             <button
               onClick={() => setActiveTab('comments')}
-              className={`pb-4 text-sm font-bold transition-all relative flex items-center gap-1.5 ${activeTab === 'comments' ? 'text-amber-500' : 'text-zinc-400 hover:text-zinc-600'}`}
+              className={`pb-4 text-xs sm:text-sm font-bold transition-all relative flex items-center gap-1.5 whitespace-nowrap ${activeTab === 'comments' ? 'text-amber-500' : 'text-zinc-400 hover:text-zinc-600'}`}
             >
               Comments
               <div className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter ${activeTab === 'comments' ? 'bg-amber-100 text-amber-600' : 'bg-zinc-100 text-zinc-400'}`}>
@@ -1580,8 +1580,8 @@ export default function EventDetail() {
               return commented.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
                   <MessageCircle size={40} className="mb-3 opacity-30" />
-                  <p className="font-medium">No comments yet</p>
-                  <p className="text-sm mt-1">Guests can leave feedback on photos from the guest view</p>
+                  <p className="font-medium text-center">No comments yet</p>
+                  <p className="text-sm mt-1 text-center">Guests can leave feedback on photos from the guest view</p>
                 </div>
               ) : (
                 <div className="space-y-6">

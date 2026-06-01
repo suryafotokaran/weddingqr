@@ -25,9 +25,7 @@ export default function App() {
           <span className="text-xl font-semibold tracking-tighter text-teal-800">The Editorial Union</span>
           <div className="hidden md:flex items-center space-x-8 text-sm tracking-tight">
             <a className="text-teal-700 font-bold border-b-2 border-teal-600 transition-colors" href="#">Dashboard</a>
-            <a className="text-zinc-500 font-medium hover:text-teal-600 transition-colors" href="#">Galleries</a>
-            <a className="text-zinc-500 font-medium hover:text-teal-600 transition-colors" href="#">Clients</a>
-            <a className="text-zinc-500 font-medium hover:text-teal-600 transition-colors" href="#">Settings</a>
+           
           </div>
         </div>
         <div className="flex items-center gap-6">
