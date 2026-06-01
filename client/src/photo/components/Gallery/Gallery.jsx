@@ -4,6 +4,25 @@ import { usePhoto } from "../../context/PhotoContext";
 import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 
+const GALLERY_ALTS = [
+  "Wedding photography in Tirunelveli by Fotokaran Studio",
+  "Candid wedding photographer Veeravanallur Tirunelveli",
+  "Pre-wedding photoshoot Tirunelveli Kanyakumari",
+  "Best candid photography studio Tirunelveli",
+  "Wedding reception photography Nanguneri Tirunelveli",
+  "Engagement photoshoot Tirunelveli by Fotokaran Studio",
+  "Candid couple photography Nagercoil Kanyakumari",
+  "Wedding photography Palayamkottai Tirunelveli",
+  "Professional wedding photographer Valliyur Tirunelveli",
+  "Candid photography Ambasamudram Tirunelveli",
+  "Wedding photographer near Marthandam Kanyakumari",
+  "Best photo studio Tirunelveli district",
+  "Bridal photography Tirunelveli Fotokaran Studio",
+  "Outdoor pre-wedding shoot Kanyakumari",
+  "Wedding album photography Tirunelveli",
+  "Candid moments wedding photography Tirunelveli",
+];
+
 const PAGE_SIZE = 8;
 
 const Gallery = () => {
@@ -67,7 +86,7 @@ const Gallery = () => {
           <img
             key={photo.id}
             src={photo.url}
-            alt="photography gallery"
+            alt={GALLERY_ALTS[i % GALLERY_ALTS.length]}
             loading={i < 2 ? 'eager' : 'lazy'}
             style={{ width: "280px", height: "420px", objectFit: "cover" }}
             onClick={() => openModal(photo.url)}

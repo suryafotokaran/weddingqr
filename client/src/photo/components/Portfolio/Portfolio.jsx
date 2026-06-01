@@ -48,7 +48,7 @@ const Portfolio = () => {
             className="portfolio__card"
             style={{ "--category-name": `"${portfolio.name}"` }}
           >
-            <img src={portfolio.cover_url} alt={`${portfolio.name} photography`} loading="lazy" />
+            <img src={portfolio.cover_url} alt={`${portfolio.name} photography in Tirunelveli – Fotokaran Studio`} loading="lazy" />
             <div className="portfolio__content">
               <button
                 className="py-3 px-6 text-base font-medium text-white bg-neutral-900 rounded-md border-none outline-none cursor-pointer hover:bg-neutral-600 transition-colors duration-300"

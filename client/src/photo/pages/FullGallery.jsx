@@ -4,6 +4,29 @@ import { usePhoto } from "../context/PhotoContext";
 import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 
+const GALLERY_ALTS = [
+  "Wedding photography in Tirunelveli by Fotokaran Studio",
+  "Candid wedding photographer Veeravanallur Tirunelveli",
+  "Pre-wedding photoshoot Tirunelveli Kanyakumari",
+  "Best candid photography studio Tirunelveli",
+  "Wedding reception photography Nanguneri Tirunelveli",
+  "Engagement photoshoot Tirunelveli by Fotokaran Studio",
+  "Candid couple photography Nagercoil Kanyakumari",
+  "Wedding photography Palayamkottai Tirunelveli",
+  "Professional wedding photographer Valliyur Tirunelveli",
+  "Candid photography Ambasamudram Tirunelveli",
+  "Wedding photographer near Marthandam Kanyakumari",
+  "Best photo studio Tirunelveli district",
+  "Bridal photography Tirunelveli Fotokaran Studio",
+  "Outdoor pre-wedding shoot Kanyakumari",
+  "Wedding album photography Tirunelveli",
+  "Candid moments wedding photography Tirunelveli",
+  "Reception photography Thisayanvilai Tirunelveli",
+  "Wedding candid Radhapuram Tirunelveli",
+  "Photography studio Cheranmahadevi Tirunelveli",
+  "Best photographer Kallidaikurichi Tirunelveli",
+];
+
 const FullGallery = () => {
   const navigate = useNavigate();
   const [modalImage, setModalImage] = useState(null);
@@ -54,11 +77,11 @@ const FullGallery = () => {
           </button>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-[10px] sm:gap-[15px] py-5">
-          {galleryPhotos.map((photo) => (
+          {galleryPhotos.map((photo, i) => (
             <div key={photo.id} className="rounded-[10px] overflow-hidden shadow-md hover:scale-[1.05] transition-transform duration-300">
               <img
                 src={photo.url}
-                alt="gallery"
+                alt={GALLERY_ALTS[i % GALLERY_ALTS.length]}
                 className="w-full h-[200px] sm:h-[250px] object-cover cursor-pointer"
                 onClick={() => openModal(photo.url)}
               />

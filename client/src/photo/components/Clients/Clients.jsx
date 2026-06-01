@@ -78,7 +78,7 @@ const Clients = () => {
                               >
                                 <img
                                   src={p.url}
-                                  alt=""
+                                  alt={`Wedding photography by Fotokaran Studio Tirunelveli – ${t.name}`}
                                   loading="lazy"
                                   className="w-full h-full object-cover"
                                 />
@@ -130,7 +130,7 @@ const Clients = () => {
                 <img
                   key={i}
                   src={p.url}
-                  alt=""
+                  alt={`Client wedding photo ${i + 1} – Fotokaran Studio Tirunelveli`}
                   loading="lazy"
                   className="w-full aspect-square object-cover rounded-xl"
                 />
