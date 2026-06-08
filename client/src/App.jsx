@@ -52,7 +52,9 @@ function AppContent() {
     || location.pathname.startsWith('/v/')
     || location.pathname.startsWith('/upload/')
     || location.pathname.startsWith('/qr/')
-    || location.pathname.startsWith('/w/');
+    || location.pathname.startsWith('/w/')
+    || location.pathname === '/signin'
+    || location.pathname === '/forgot-password';
 
   return (
     <>
@@ -112,6 +114,7 @@ function AppContent() {
 
         {/* Public guest routes */}
         <Route path="/w/:eventId" element={<PublicWebsite />} />
+        <Route path="/w/:eventId/edit" element={<WebsiteBuilder />} />
         <Route path="/upload/:id" element={<GuestUpload />} />
         <Route path="/v/:id" element={<GuestEventView />} />
         <Route path="/qr/:id" element={<QRView />} />

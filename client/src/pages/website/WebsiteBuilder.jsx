@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as LucideIcons from 'lucide-react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { TEMPLATES, SECTIONS, DEFAULT_DATA } from './templates/templateRegistry';
 import TemplateRenderer from './TemplateRenderer';
-import { ChevronLeft, ChevronDown, ChevronUp, Globe, Copy, Check, Plus, Trash2, Save, Eye, EyeOff, Smartphone, Upload, ImageIcon } from 'lucide-react';
+import { IPhoneFrame } from 'react-framify';
+import { ChevronLeft, ChevronDown, ChevronUp, Globe, Copy, Check, Plus, Trash2, Eye, EyeOff, Smartphone, Upload, ImageIcon, Pencil, Sparkles, EyeOff as Unpublish } from 'lucide-react';
+
+// 1×1 transparent GIF — required by IPhoneFrame's screenshotList prop
+const TRANSPARENT_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 import Toast from '../../components/Toast';
 import { uploadToR2 } from '../../lib/s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -28,9 +32,16 @@ function deepMerge(base, override) {
 
 function Toggle({ checked, onChange }) {
   return (
-    <button type="button" onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${checked ? 'bg-indigo-500' : 'bg-zinc-300'}`}>
-      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-1'}`} />
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className="relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-all duration-200"
+      style={checked
+        ? { background: 'linear-gradient(135deg, #e8708a 0%, #c9956c 100%)', boxShadow: '0 2px 8px rgba(232,112,138,0.35)' }
+        : { background: '#d1d5db' }
+      }
+    >
+      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${checked ? 'translate-x-4' : 'translate-x-1'}`} />
     </button>
   );
 }
@@ -230,17 +241,22 @@ function makeGalleryForm(userId, eventName) {
 
 // ─────────────────────────────────────────────────────────────
 export default function WebsiteBuilder() {
-  const { id: eventId } = useParams();
+  const params = useParams();
+  const eventId = params.id || params.eventId;
   const navigate = useNavigate();
+  const location = useLocation();
+  const isPublicMode = location.pathname.startsWith('/w/');
 
   const [configId, setConfigId] = useState(null);
   const [templateId, setTemplateId] = useState('template1');
   const [data, setData] = useState(DEFAULT_DATA);
-  const [isPublished, setIsPublished] = useState(false);
+  const [isPublished, setIsPublished] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [hasUnsaved, setHasUnsaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  const isFirstLoad = useRef(true);
+  const autoSaveTimer = useRef(null);
+  const latestRef = useRef({ data, templateId, configId });
   const [activeSection, setActiveSection] = useState(null);
   const [copied, setCopied] = useState(false);
   const [mobileTab, setMobileTab] = useState('edit');
@@ -273,42 +289,57 @@ export default function WebsiteBuilder() {
         setConfigId(existing.id);
         setTemplateId(existing.template_id || 'template1');
         setData(deepMerge(DEFAULT_DATA, existing.data || {}));
-        setIsPublished(existing.is_published || false);
+        setIsPublished(existing.is_published ?? true);
         setSlug(existing.slug || '');
       } else {
-        const { data: created } = await supabase.from('website_configs').insert({ event_id: eventId, template_id: 'template1', data: DEFAULT_DATA, is_published: false }).select().single();
+        const { data: created } = await supabase.from('website_configs').insert({ event_id: eventId, template_id: 'template1', data: DEFAULT_DATA, is_published: true }).select().single();
         if (created) setConfigId(created.id);
       }
       setLoading(false);
     })();
   }, [eventId]);
 
-  const handleDataChange = (newData) => { setData(newData); setHasUnsaved(true); };
-  const handleTemplateChange = (tid) => { setTemplateId(tid); setHasUnsaved(true); };
+  const handleDataChange = (newData) => { setData(newData); };
+  const handleTemplateChange = (tid) => { setTemplateId(tid); };
+
+  // Keep latestRef in sync so the auto-save timer always writes fresh values
+  useEffect(() => { latestRef.current = { data, templateId, configId }; }, [data, templateId, configId]);
+
+  // Auto-save on any data / template change (debounced 800 ms)
+  useEffect(() => {
+    if (isFirstLoad.current) { isFirstLoad.current = false; return; }
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      const { data: d, templateId: tid, configId: cid } = latestRef.current;
+      if (!cid) return;
+      setIsSaving(true);
+      const newSlug = generateSlug(d.hero);
+      const galleryBytes = (d?.gallery?.items ?? []).reduce((sum, item) => sum + (item.size_bytes || 0), 0);
+      const updates = { data: d, template_id: tid, updated_at: new Date().toISOString(), gallery_size_bytes: galleryBytes };
+      if (newSlug) updates.slug = newSlug;
+      const { error } = await supabase.from('website_configs').update(updates).eq('id', cid);
+      setIsSaving(false);
+      if (!error && newSlug) setSlug(newSlug);
+    }, 800);
+    return () => clearTimeout(autoSaveTimer.current);
+  }, [data, templateId]);
 
   const showToast = (type, title, message) => {
     setToast({ type, title, message });
     setTimeout(() => setToast(null), 4000);
   };
 
-  const doSave = async (publish = null) => {
+  const togglePublish = async (publish) => {
     if (!configId) return;
     setIsSaving(true);
-    const newSlug = generateSlug(data.hero);
-    const galleryBytes = (data?.gallery?.items ?? []).reduce((sum, item) => sum + (item.size_bytes || 0), 0);
-    const updates = { data, template_id: templateId, updated_at: new Date().toISOString(), gallery_size_bytes: galleryBytes };
-    if (newSlug) updates.slug = newSlug;
-    if (publish !== null) updates.is_published = publish;
-    const { error } = await supabase.from('website_configs').update(updates).eq('id', configId);
+    const { error } = await supabase.from('website_configs').update({ is_published: publish, updated_at: new Date().toISOString() }).eq('id', configId);
     setIsSaving(false);
     if (!error) {
-      if (newSlug) setSlug(newSlug);
-      setHasUnsaved(false);
-      if (publish === true)  { setIsPublished(true);  showToast('success', 'Published! 🎉', 'Your wedding website is now live.'); }
-      else if (publish === false) { setIsPublished(false); showToast('success', 'Unpublished', 'Your site is now hidden from visitors.'); }
-      else { showToast('success', 'Saved', 'All changes saved successfully.'); }
+      setIsPublished(publish);
+      if (publish) showToast('success', 'Published!', 'Your wedding website is now live.');
+      else showToast('success', 'Unpublished', 'Your site is now hidden from visitors.');
     } else {
-      showToast('error', 'Save failed', error.message);
+      showToast('error', 'Failed', error.message);
     }
   };
 
@@ -316,100 +347,193 @@ export default function WebsiteBuilder() {
     navigator.clipboard.writeText(shareUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   };
 
-  if (loading) return <div className="flex items-center justify-center h-screen bg-zinc-950 text-zinc-500 text-sm">Loading builder…</div>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center h-[100dvh]"
+      style={{ background: 'linear-gradient(145deg, #0a0a0f 0%, #130d10 100%)' }}>
+      <div className="relative mb-6">
+        <div className="absolute -inset-4 rounded-[28px] opacity-50 blur-2xl animate-pulse pointer-events-none"
+          style={{ background: 'linear-gradient(135deg, #e8708a, #c9956c)' }} />
+        <div className="relative w-20 h-20 rounded-[24px] flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg, #e8708a 0%, #c9956c 100%)', boxShadow: '0 20px 60px rgba(232,112,138,0.35)' }}>
+          <Sparkles size={32} className="text-white" />
+        </div>
+      </div>
+      <p className="text-white font-extrabold text-xl tracking-tight">Wedding Builder</p>
+      <p className="text-zinc-500 text-sm mt-1.5 font-medium">Preparing your canvas…</p>
+      <div className="flex gap-2 mt-8">
+        {[0, 150, 300].map((delay, i) => (
+          <div key={i} className="w-2 h-2 rounded-full bg-rose-400 animate-bounce"
+            style={{ animationDelay: `${delay}ms` }} />
+        ))}
+      </div>
+    </div>
+  );
 
-  const statusDot = isPublished ? 'bg-green-400' : 'bg-zinc-600';
-  const statusLabel = isSaving ? 'Saving…' : hasUnsaved ? 'Unsaved' : isPublished ? 'Published' : 'Draft';
+  const statusLabel = isSaving ? 'Saving…' : isPublished ? 'Live' : 'Unpublished';
+  const statusStyle = isSaving
+    ? { dot: 'bg-amber-400 animate-pulse', text: 'text-amber-400', pill: 'bg-amber-900/25 border-amber-500/25' }
+    : isPublished
+    ? { dot: 'bg-emerald-400', text: 'text-emerald-400', pill: 'bg-emerald-900/25 border-emerald-500/25' }
+    : { dot: 'bg-zinc-600', text: 'text-zinc-500', pill: 'bg-zinc-800/60 border-zinc-700/40' };
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-zinc-950">
+    <div className="flex flex-col h-[100dvh] overflow-hidden"
+      style={{ background: 'linear-gradient(160deg, #12081e 0%, #0f0a1a 50%, #130d10 100%)' }}>
 
-      {/* ── TOP NAV BAR ── */}
-      <header className="flex items-center gap-3 px-5 py-0 bg-zinc-900 border-b border-zinc-800 shrink-0 h-14">
-        <button onClick={() => navigate(`/admin/events/${eventId}`)} className="flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors">
-          <ChevronLeft size={18} />
-          <span className="text-sm font-medium hidden sm:block">Back</span>
-        </button>
-
-        <div className="w-px h-6 bg-zinc-700 mx-1" />
-
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="text-white font-semibold text-sm truncate">Website Builder</span>
-          <div className="flex items-center gap-1.5 bg-zinc-800 rounded-full px-2.5 py-1">
-            <div className={`w-1.5 h-1.5 rounded-full ${statusDot} ${isSaving ? 'animate-pulse' : ''}`} />
-            <span className="text-zinc-400 text-[10px] font-semibold uppercase tracking-wider">{statusLabel}</span>
+      {/* ─────────── PREMIUM HEADER ─────────── */}
+      <header
+        className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 shrink-0 h-14 sm:h-16"
+        style={{
+          background: 'rgba(13,11,16,0.96)',
+          backdropFilter: 'blur(24px)',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          boxShadow: '0 1px 0 rgba(255,255,255,0.03), 0 8px 32px rgba(0,0,0,0.5)',
+        }}
+      >
+        {/* Left — back + brand */}
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          {!isPublicMode && (
+            <button
+              onClick={() => navigate(`/admin/events/${eventId}`)}
+              className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0 transition-all"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+            >
+              <ChevronLeft size={18} />
+            </button>
+          )}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-lg shrink-0 flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, #e8708a 0%, #c9956c 100%)', boxShadow: '0 4px 12px rgba(232,112,138,0.3)' }}>
+              <Sparkles size={13} className="text-white" />
+            </div>
+            <div className="min-w-0 hidden sm:block">
+              <p className="text-white font-bold text-sm leading-none truncate">
+                {isPublicMode ? 'Your Wedding Website' : 'Website Builder'}
+              </p>
+              {eventName && (
+                <p className="text-zinc-500 text-[10px] mt-0.5 truncate font-medium">{eventName}</p>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Preview toggle */}
+        {/* Center — status pill */}
+        <div className="flex justify-center shrink-0">
+          <div className={`hidden sm:flex items-center gap-1.5 rounded-full px-3 py-1.5 border ${statusStyle.pill}`}>
+            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusStyle.dot} ${isSaving ? 'animate-pulse' : ''}`} />
+            <span className={`text-[10px] font-bold uppercase tracking-widest ${statusStyle.text}`}>{statusLabel}</span>
+          </div>
+        </div>
+
+        {/* Right — actions */}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-1 justify-end">
+          {/* Preview toggle — desktop only */}
           <button
             onClick={() => setPreviewMode(m => m === 'phone' ? 'full' : 'phone')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white text-xs font-semibold transition-colors"
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border border-white/5"
+            style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)' }}
           >
-            <Smartphone size={13} /> {previewMode === 'phone' ? 'Full' : 'Phone'}
+            <Smartphone size={13} />
+            <span className="hidden lg:inline">{previewMode === 'phone' ? 'Full' : 'Phone'}</span>
           </button>
 
-          {/* Save */}
-          <button
-            onClick={() => doSave()}
-            disabled={!hasUnsaved || isSaving}
-            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${hasUnsaved ? 'bg-zinc-700 text-white hover:bg-zinc-600' : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'}`}
-          >
-            <Save size={14} /> {isSaving ? 'Saving…' : 'Save'}
-          </button>
+          {/* Share link — always visible when published */}
+          {isPublished && (
+            <button
+              onClick={handleCopyLink}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border"
+              style={{ background: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.25)', color: '#6ee7b7' }}
+            >
+              {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Share</>}
+            </button>
+          )}
 
-          {/* Publish / Unpublish */}
-          {!isPublished ? (
-            <button onClick={() => doSave(true)} disabled={isSaving}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all">
-              <Globe size={14} /> Publish
+          {/* Unpublish / Publish toggle */}
+          {isPublished ? (
+            <button
+              onClick={() => togglePublish(false)}
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold disabled:opacity-50 transition-all border"
+              style={{ background: 'rgba(239,68,68,0.10)', borderColor: 'rgba(239,68,68,0.25)', color: '#fca5a5' }}
+            >
+              <EyeOff size={13} />
+              <span className="hidden sm:inline">Unpublish</span>
             </button>
           ) : (
-            <div className="flex items-center gap-2">
-              <button onClick={handleCopyLink}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 text-xs font-bold hover:bg-indigo-600/30 transition-all">
-                {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Share</>}
-              </button>
-              <div className="flex items-center gap-1.5 bg-green-900/40 border border-green-500/30 rounded-lg px-3 py-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-green-300 text-xs font-bold">Live</span>
-                <button onClick={() => doSave(false)} className="text-zinc-500 hover:text-red-400 text-[10px] font-semibold ml-1 transition-colors">✕</button>
-              </div>
-            </div>
+            <button
+              onClick={() => togglePublish(true)}
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold text-white disabled:opacity-50 transition-all"
+              style={{ background: 'linear-gradient(135deg, #e8708a 0%, #c9956c 100%)', boxShadow: '0 4px 16px rgba(232,112,138,0.3)' }}
+            >
+              <Globe size={13} />
+              <span className="hidden sm:inline">Publish</span>
+            </button>
           )}
         </div>
       </header>
 
-      {/* ── BODY ── */}
+      {/* ─────────── BODY ─────────── */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── LEFT PANEL ── */}
-        <aside className="w-72 shrink-0 flex flex-col bg-white border-r border-zinc-200 overflow-hidden">
-
-          {/* Mobile tabs */}
-          <div className="md:hidden flex border-b border-zinc-100">
-            <button onClick={() => setMobileTab('edit')} className={`flex-1 py-2.5 text-xs font-bold ${mobileTab === 'edit' ? 'text-indigo-600 border-b-2 border-indigo-500' : 'text-zinc-400'}`}>Edit</button>
-            <button onClick={() => setMobileTab('preview')} className={`flex-1 py-2.5 text-xs font-bold ${mobileTab === 'preview' ? 'text-indigo-600 border-b-2 border-indigo-500' : 'text-zinc-400'}`}>Preview</button>
+        {/* ─────────── EDIT PANEL ─────────── */}
+        <aside className={`flex flex-col bg-white overflow-hidden
+          md:w-80 md:shrink-0 md:border-r md:border-zinc-100
+          ${mobileTab === 'edit' ? 'flex flex-1' : 'hidden md:flex'}
+        `}
+          style={{ boxShadow: '4px 0 32px rgba(0,0,0,0.15)' }}
+        >
+          {/* Panel header */}
+          <div className="px-5 py-4 border-b border-zinc-100 shrink-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] mb-0.5"
+                  style={{ background: 'linear-gradient(135deg, #e8708a, #c9956c)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                  Customize
+                </p>
+                <h2 className="text-base font-extrabold text-zinc-900 tracking-tight">Your Wedding Site</h2>
+              </div>
+              {/* Mobile — switch to preview */}
+              <button
+                onClick={() => setMobileTab('preview')}
+                className="md:hidden w-9 h-9 flex items-center justify-center rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-500 transition-colors"
+              >
+                <Eye size={16} />
+              </button>
+            </div>
           </div>
 
+          {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto">
 
-            {/* Template picker */}
+            {/* ── Template Picker ── */}
             <div className="p-4 border-b border-zinc-100">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-3">Template</p>
-              <div className="grid grid-cols-2 gap-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 mb-3">Choose Template</p>
+              <div className="grid grid-cols-2 gap-2.5">
                 {TEMPLATES.map(tpl => (
-                  <button key={tpl.id} onClick={() => handleTemplateChange(tpl.id)}
-                    className={`relative rounded-xl border-2 p-3 text-left transition-all ${templateId === tpl.id ? 'border-indigo-400 bg-indigo-50 shadow-sm' : 'border-zinc-100 bg-zinc-50 hover:border-zinc-200'}`}>
-                    <div className="text-xl mb-1.5">{tpl.thumbnail}</div>
-                    <div className="text-[11px] font-bold text-zinc-800 leading-tight">{tpl.name}</div>
-                    <div className="flex gap-1 mt-1.5">
-                      {tpl.colors.map((c, i) => <div key={i} style={{ background: c }} className="w-2.5 h-2.5 rounded-full border border-white shadow-sm" />)}
+                  <button
+                    key={tpl.id}
+                    onClick={() => handleTemplateChange(tpl.id)}
+                    className="relative rounded-2xl border-2 p-3.5 text-left transition-all duration-200"
+                    style={templateId === tpl.id
+                      ? { borderColor: '#e8708a', background: 'linear-gradient(135deg, #fff5f7 0%, #fffaf5 100%)', boxShadow: '0 4px 16px rgba(232,112,138,0.15)' }
+                      : { borderColor: '#f0f0f0', background: '#fafafa' }
+                    }
+                  >
+                    <div className="text-2xl mb-2 leading-none">{tpl.thumbnail}</div>
+                    <div className="text-[11px] font-bold text-zinc-800 leading-tight mb-2">{tpl.name}</div>
+                    <div className="flex gap-1.5">
+                      {tpl.colors.map((c, i) => (
+                        <div key={i} style={{ background: c }}
+                          className="w-3 h-3 rounded-full border-2 border-white shadow-sm" />
+                      ))}
                     </div>
                     {templateId === tpl.id && (
-                      <div className="absolute top-2 right-2 w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center">
-                        <Check size={9} className="text-white" />
+                      <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full flex items-center justify-center shadow-md"
+                        style={{ background: 'linear-gradient(135deg, #e8708a, #c9956c)' }}>
+                        <Check size={10} className="text-white" />
                       </div>
                     )}
                   </button>
@@ -417,32 +541,56 @@ export default function WebsiteBuilder() {
               </div>
             </div>
 
-            {/* Sections */}
+            {/* ── Sections ── */}
             <div className="p-4">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-3">Sections</p>
-              <div className="space-y-1.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 mb-3">Sections</p>
+              <div className="space-y-2">
                 {SECTIONS.map(sec => {
                   const secData = data[sec.key] || {};
                   const enabled = secData.enabled !== false;
                   const isOpen = activeSection === sec.key;
-                  const Form = sec.key === 'gallery' ? makeGalleryForm(eventUserId, eventName) : SECTION_FORMS[sec.key];
+                  const Form = sec.key === 'gallery'
+                    ? makeGalleryForm(eventUserId, eventName)
+                    : SECTION_FORMS[sec.key];
+
                   return (
-                    <div key={sec.key} className={`rounded-xl border transition-all ${isOpen ? 'border-indigo-200 bg-indigo-50/30' : 'border-zinc-100 bg-white'}`}>
-                      <div className="flex items-center gap-3 px-3 py-2.5">
-                        <Toggle checked={enabled} onChange={v => handleDataChange({ ...data, [sec.key]: { ...secData, enabled: v } })} />
-                        <SectionIcon name={sec.icon} size={15} className={enabled ? 'text-indigo-500' : 'text-zinc-300'} />
-                        <button className={`flex-1 text-left text-sm font-semibold transition-colors ${enabled ? 'text-zinc-800' : 'text-zinc-400'}`}
-                          onClick={() => Form && activeSection !== sec.key ? setActiveSection(sec.key) : setActiveSection(null)}>
+                    <div
+                      key={sec.key}
+                      className="rounded-2xl border-2 overflow-hidden transition-all duration-200"
+                      style={isOpen
+                        ? { borderColor: '#f5c0cc', background: 'linear-gradient(135deg, #fff8f9 0%, #fffcf8 100%)' }
+                        : { borderColor: '#f0f0f0', background: '#fff' }
+                      }
+                    >
+                      <div className="flex items-center gap-3 px-3.5 py-3">
+                        <Toggle
+                          checked={enabled}
+                          onChange={v => handleDataChange({ ...data, [sec.key]: { ...secData, enabled: v } })}
+                        />
+                        <SectionIcon
+                          name={sec.icon}
+                          size={15}
+                          className={enabled ? 'text-rose-400' : 'text-zinc-300'}
+                        />
+                        <button
+                          className={`flex-1 text-left text-sm font-semibold transition-colors
+                            ${enabled ? 'text-zinc-800' : 'text-zinc-400'}`}
+                          onClick={() => Form && setActiveSection(isOpen ? null : sec.key)}
+                        >
                           {sec.label}
                         </button>
                         {Form && (
-                          <button onClick={() => setActiveSection(isOpen ? null : sec.key)} className={`transition-colors ${isOpen ? 'text-indigo-500' : 'text-zinc-300 hover:text-zinc-500'}`}>
+                          <button
+                            onClick={() => setActiveSection(isOpen ? null : sec.key)}
+                            className="transition-all duration-200"
+                            style={{ color: isOpen ? '#e8708a' : '#d1d5db' }}
+                          >
                             {isOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                           </button>
                         )}
                       </div>
                       {isOpen && Form && enabled && (
-                        <div className="px-3 pb-3 pt-1">
+                        <div className="px-3.5 pb-4 pt-1 border-t border-rose-100/70">
                           <Form data={data} onChange={handleDataChange} />
                         </div>
                       )}
@@ -452,66 +600,212 @@ export default function WebsiteBuilder() {
               </div>
             </div>
 
-            {/* Share section */}
+            {/* ── Share ── */}
             <div className="p-4 border-t border-zinc-100">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-3">Share</p>
-              <div className="bg-zinc-50 rounded-xl p-3 border border-zinc-100 mb-3">
-                <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Public Link</p>
-                <p className="text-xs text-zinc-600 break-all font-mono leading-relaxed">{shareUrl}</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 mb-3">Share</p>
+              <div className="rounded-2xl p-3.5 border border-zinc-100 mb-3"
+                style={{ background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)' }}>
+                <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1.5">Public Link</p>
+                <p className="text-xs text-zinc-600 break-all font-mono leading-relaxed select-all">{shareUrl}</p>
               </div>
-              <button onClick={handleCopyLink}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-zinc-200 text-zinc-700 font-semibold text-sm hover:bg-zinc-50 transition-all">
-                {copied ? <><Check size={14} className="text-green-500" /> Copied!</> : <><Copy size={14} /> Copy Link</>}
+              <button
+                onClick={handleCopyLink}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl font-bold text-sm transition-all border-2"
+                style={copied
+                  ? { borderColor: '#10b981', color: '#10b981', background: '#f0fdf4' }
+                  : { borderColor: '#e5e7eb', color: '#374151', background: '#fff' }
+                }
+              >
+                {copied
+                  ? <><Check size={14} /> Copied!</>
+                  : <><Copy size={14} /> Copy Share Link</>
+                }
               </button>
-              {isPublished && (
-                <a href={shareUrl} target="_blank" rel="noopener noreferrer"
-                  className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 font-semibold text-sm hover:bg-indigo-100 transition-all">
-                  <Eye size={14} /> Open Site
-                </a>
-              )}
+              <a
+                href={shareUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2.5 flex items-center justify-center gap-2 py-2.5 rounded-2xl font-bold text-sm text-white transition-all"
+                style={{ background: 'linear-gradient(135deg, #e8708a 0%, #c9956c 100%)', boxShadow: '0 4px 16px rgba(232,112,138,0.25)' }}
+              >
+                <Eye size={14} /> Open Live Site
+              </a>
             </div>
+
+            {/* Bottom padding for mobile nav */}
+            <div className="h-20 md:h-4" />
           </div>
         </aside>
 
-        {/* ── PREVIEW PANE ── */}
-        <main className={`flex-1 flex flex-col overflow-hidden bg-zinc-950 ${mobileTab === 'edit' ? 'hidden md:flex' : 'flex'}`}>
-          <div className="flex-1 overflow-auto flex items-center justify-center p-8">
+        {/* ─────────── PREVIEW PANE ─────────── */}
+        <main
+          className={`flex-1 overflow-hidden relative
+            ${mobileTab === 'preview' ? 'flex flex-col' : 'hidden md:flex md:flex-col'}
+          `}
+        >
+          {/* Premium background */}
+          <div className="absolute inset-0 pointer-events-none"
+            style={{
+              background: 'linear-gradient(145deg, #1a0a2e 0%, #0f0a1a 35%, #1a0f0a 65%, #0a1020 100%)',
+            }} />
+          {/* Subtle rose-gold radial glow */}
+          <div className="absolute inset-0 pointer-events-none"
+            style={{
+              background: 'radial-gradient(ellipse 80% 60% at 50% 40%, rgba(201,149,108,0.10) 0%, rgba(232,112,138,0.06) 40%, transparent 70%)',
+            }} />
+          {/* Fine dot grid */}
+          <div className="absolute inset-0 pointer-events-none"
+            style={{
+              backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)',
+              backgroundSize: '24px 24px',
+            }} />
+
+          {/* Preview mode toggle — desktop */}
+          <div className="absolute top-4 right-4 z-10 hidden md:flex">
+            <button
+              onClick={() => setPreviewMode(m => m === 'phone' ? 'full' : 'phone')}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+              style={{
+                background: 'rgba(255,255,255,0.07)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.6)',
+                backdropFilter: 'blur(12px)',
+              }}
+            >
+              <Smartphone size={13} />
+              {previewMode === 'phone' ? 'Full View' : 'Phone View'}
+            </button>
+          </div>
+
+          {/* Preview content */}
+          <div className="flex-1 overflow-hidden flex items-center justify-center p-4 sm:p-8 relative z-10">
             {previewMode === 'phone' ? (
-              /* Phone mockup */
-              <div className="relative flex flex-col items-center">
-                <div className="relative w-[390px] bg-zinc-800 rounded-[52px] p-[10px] shadow-2xl shadow-black/60 ring-1 ring-white/10">
-                  {/* Notch */}
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-7 bg-zinc-800 rounded-b-3xl z-10 flex items-center justify-center">
-                    <div className="w-16 h-4 bg-zinc-900 rounded-full" />
-                  </div>
-                  {/* Screen */}
-                  <div className="w-full overflow-hidden rounded-[44px] bg-zinc-900 flex flex-col" style={{ height: '640px' }}>
-                    {/* Status bar */}
-                    <div className="h-8 shrink-0 bg-zinc-900 flex items-center justify-between px-6 pt-1">
-                      <span className="text-white text-[10px] font-semibold">9:41</span>
-                      <div className="flex items-center gap-1">
-                        <div className="w-3.5 h-2 rounded-sm border border-white/60 relative"><div className="absolute inset-0.5 right-0.5 bg-white/60 rounded-sm" style={{right:'25%'}} /></div>
-                      </div>
-                    </div>
-                    {/* Content */}
-                    <div className="flex-1 overflow-hidden bg-white">
+              /* ── react-framify IPhoneFrame + live iframe overlay ── */
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%' }}>
+                {/*
+                  IPhoneFrame renders an <img zIndex=-1> inside a positioned shell.
+                  We fix the figure's absolute positioning via a style override,
+                  then absolutely overlay the live iframe + our own Dynamic Island
+                  and status bar on top (zIndex > the device div's zIndex:10).
+
+                  Known IPhoneFrame portrait dimensions:
+                    outer device div: 250.38 × 507.5px, border 3px
+                    inner ring div:   border 9px solid #000
+                    visible screen:   top=12px left=15px w=226px h=484px
+                    dynamic island:   top=19px, centered, 74×26px
+                */}
+                <div style={{ position:'relative' }}>
+                  {/* Fix react-framify's figure CSS and hide nav buttons */}
+                  <style>{`
+                    .phone__frameset--wrapper {
+                      position: static !important;
+                      top: auto !important;
+                      left: auto !important;
+                      margin-top: 0 !important;
+                      transform: none !important;
+                    }
+                    .preview__scroll--btns { display: none !important; }
+                  `}</style>
+
+                  <IPhoneFrame
+                    screenshotList={[TRANSPARENT_IMG]}
+                    statusBar={{ mode: 'dark' }}
+                    deviceColor="#1c1c1e"
+                  />
+
+                  {/* ── Live website content ── */}
+                  <div style={{
+                    position:'absolute', top:12, left:15,
+                    width:226, height:484,
+                    overflow:'hidden', borderRadius:35,
+                    zIndex:15, background:'#000',
+                  }}>
+                    <div style={{ position:'absolute', inset:0, width:'100%', height:'100%', overflow:'auto' }}>
                       <TemplateRenderer templateId={templateId} data={data} />
                     </div>
+                    {/* Home indicator */}
+                    <div style={{
+                      position:'absolute', bottom:8, left:'50%',
+                      transform:'translateX(-50%)',
+                      width:68, height:4,
+                      background:'rgba(255,255,255,0.3)',
+                      borderRadius:100, zIndex:5,
+                    }} />
+                  </div>
+
+                  {/* ── Dynamic Island ── */}
+                  <div style={{
+                    position:'absolute', top:19, left:'50%',
+                    transform:'translateX(-50%)',
+                    width:74, height:26,
+                    background:'#000', borderRadius:100,
+                    zIndex:20, boxShadow:'0 2px 8px rgba(0,0,0,0.8)',
+                  }} />
+
+                  {/* ── Status bar ── */}
+                  <div style={{
+                    position:'absolute', top:12, left:15, width:226,
+                    height:40, display:'flex', alignItems:'center',
+                    justifyContent:'space-between',
+                    paddingLeft:14, paddingRight:12, paddingTop:10,
+                    zIndex:20, pointerEvents:'none',
+                  }}>
+                    <span style={{ color:'#fff', fontSize:12, fontWeight:700, letterSpacing:'-0.2px' }}>9:41</span>
+                    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                      <svg width="17" height="12" viewBox="0 0 17 12" fill="none">
+                        <rect x="0"    y="8"   width="3" height="4"  rx="1" fill="#fff" opacity="0.4"/>
+                        <rect x="4.7"  y="5.5" width="3" height="6.5" rx="1" fill="#fff" opacity="0.6"/>
+                        <rect x="9.4"  y="3"   width="3" height="9"  rx="1" fill="#fff" opacity="0.8"/>
+                        <rect x="14.1" y="0"   width="3" height="12" rx="1" fill="#fff"/>
+                      </svg>
+                      <svg width="15" height="12" viewBox="0 0 15 12" fill="none">
+                        <circle cx="7.5" cy="10.5" r="1.6" fill="#fff"/>
+                        <path d="M4 7.3C5.3 5.8 6.3 5.2 7.5 5.2s2.2.6 3.5 2.1" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+                        <path d="M1.2 4.5C3.4 2 5.3.8 7.5.8s4.1 1.2 6.3 3.7" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+                      </svg>
+                      <div style={{ display:'flex', alignItems:'center' }}>
+                        <div style={{ width:22, height:11, border:'1.5px solid rgba(255,255,255,0.6)', borderRadius:3, padding:'1.5px', position:'relative' }}>
+                          <div style={{ width:'75%', height:'100%', background:'#fff', borderRadius:1.5 }} />
+                          <div style={{ position:'absolute', right:-3.5, top:'50%', transform:'translateY(-50%)', width:2.5, height:5, background:'rgba(255,255,255,0.5)', borderRadius:'0 1px 1px 0' }} />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <p className="text-zinc-600 text-xs mt-4 font-medium">iPhone 14 Pro · 390 × 844</p>
+
+                <p style={{ color:'#52525b', fontSize:'10px', marginTop:'14px', fontWeight:600, letterSpacing:'0.2em', textTransform:'uppercase' }}>
+                  iPhone 14 Pro Max
+                </p>
               </div>
             ) : (
-              /* Full browser frame */
-              <div className="w-full h-full max-w-5xl flex flex-col rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
-                <div className="flex items-center gap-2 bg-zinc-800 px-4 py-2.5 shrink-0">
-                  <div className="flex gap-1.5">
-                    <div className="w-3 h-3 rounded-full bg-red-500/70" />
-                    <div className="w-3 h-3 rounded-full bg-amber-500/70" />
-                    <div className="w-3 h-3 rounded-full bg-green-500/70" />
+              /* ── Premium Browser Frame ── */
+              <div
+                className="w-full h-full max-w-5xl flex flex-col rounded-2xl overflow-hidden"
+                style={{
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  boxShadow: '0 48px 120px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.5)',
+                }}
+              >
+                {/* Browser chrome */}
+                <div className="flex items-center gap-3 px-4 py-3 shrink-0"
+                  style={{
+                    background: 'linear-gradient(135deg, #1e1e28 0%, #16161e 100%)',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                  }}>
+                  <div className="flex gap-1.5 shrink-0">
+                    <div className="w-3 h-3 rounded-full" style={{ background: '#ff5f57' }} />
+                    <div className="w-3 h-3 rounded-full" style={{ background: '#febc2e' }} />
+                    <div className="w-3 h-3 rounded-full" style={{ background: '#28c840' }} />
                   </div>
-                  <div className="flex-1 mx-4 bg-zinc-700 rounded-md px-3 py-1 text-xs text-zinc-400 font-mono truncate">{shareUrl}</div>
+                  <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5 border border-white/5"
+                    style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <div className="w-2.5 h-2.5 rounded-full border border-emerald-500/50 flex items-center justify-center shrink-0">
+                      <div className="w-1 h-1 rounded-full bg-emerald-500/50" />
+                    </div>
+                    <span className="text-[11px] text-zinc-500 font-mono truncate">{shareUrl}</span>
+                  </div>
                 </div>
+                {/* Page */}
                 <div className="flex-1 bg-white overflow-auto">
                   <TemplateRenderer templateId={templateId} data={data} />
                 </div>
@@ -519,6 +813,56 @@ export default function WebsiteBuilder() {
             )}
           </div>
         </main>
+      </div>
+
+      {/* ─────────── MOBILE BOTTOM NAV ─────────── */}
+      <div
+        className="md:hidden flex items-stretch shrink-0 h-16"
+        style={{
+          background: 'rgba(10,10,15,0.97)',
+          borderTop: '1px solid rgba(255,255,255,0.07)',
+          backdropFilter: 'blur(24px)',
+        }}
+      >
+        <button
+          onClick={() => setMobileTab('edit')}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all"
+          style={{ color: mobileTab === 'edit' ? '#e8708a' : '#52525b' }}
+        >
+          <div className="p-1.5 rounded-xl transition-all"
+            style={mobileTab === 'edit' ? { background: 'rgba(232,112,138,0.12)' } : {}}>
+            <Pencil size={18} />
+          </div>
+          <span className="text-[10px] font-bold tracking-wide">Edit</span>
+        </button>
+
+        <div className="w-px my-3" style={{ background: 'rgba(255,255,255,0.06)' }} />
+
+        <button
+          onClick={() => setMobileTab('preview')}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all"
+          style={{ color: mobileTab === 'preview' ? '#e8708a' : '#52525b' }}
+        >
+          <div className="p-1.5 rounded-xl transition-all"
+            style={mobileTab === 'preview' ? { background: 'rgba(232,112,138,0.12)' } : {}}>
+            <Eye size={18} />
+          </div>
+          <span className="text-[10px] font-bold tracking-wide">Preview</span>
+        </button>
+
+        <div className="w-px my-3" style={{ background: 'rgba(255,255,255,0.06)' }} />
+
+        <button
+          onClick={handleCopyLink}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all"
+          style={{ color: copied ? '#10b981' : '#52525b' }}
+        >
+          <div className="p-1.5 rounded-xl transition-all"
+            style={copied ? { background: 'rgba(16,185,129,0.12)' } : {}}>
+            {copied ? <Check size={18} /> : <Copy size={18} />}
+          </div>
+          <span className="text-[10px] font-bold tracking-wide">{copied ? 'Copied' : 'Share'}</span>
+        </button>
       </div>
 
       <Toast toast={toast} onClose={() => setToast(null)} />

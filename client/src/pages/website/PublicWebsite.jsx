@@ -43,12 +43,12 @@ export default function PublicWebsite() {
     );
   }
 
-  if (!config || !config.is_published) {
+  if (!config) {
     return (
       <div style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100vh',fontFamily:'serif',color:'#4A2E1A',textAlign:'center',padding:'24px' }}>
         <div style={{ fontSize:'48px',marginBottom:'16px' }}>🌸</div>
-        <h1 style={{ fontSize:'28px',fontWeight:'400',marginBottom:'8px' }}>Coming Soon</h1>
-        <p style={{ fontSize:'14px',color:'#888' }}>This wedding website hasn't been published yet.</p>
+        <h1 style={{ fontSize:'28px',fontWeight:'400',marginBottom:'8px' }}>Not Found</h1>
+        <p style={{ fontSize:'14px',color:'#888' }}>This wedding website doesn't exist.</p>
       </div>
     );
   }
