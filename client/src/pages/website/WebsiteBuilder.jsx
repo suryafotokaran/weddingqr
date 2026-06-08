@@ -714,13 +714,26 @@ export default function WebsiteBuilder() {
                   />
 
                   {/* ── Live website content ── */}
+                  {/*
+                    Outer div: clips to the phone screen shape (226×484px).
+                    Inner div: renders at real 430×932 (iPhone 14 Pro Max logical px),
+                    then scaled down by 226/430 ≈ 0.5256 to fit.
+                    position:absolute takes it out of flow so the 430px width
+                    does not overflow/expand the 226px clip container.
+                    The iframe inside fills 430×932 and handles its own scrolling.
+                  */}
                   <div style={{
                     position:'absolute', top:12, left:15,
                     width:226, height:484,
                     overflow:'hidden', borderRadius:35,
-                    zIndex:15, background:'#000',
+                    zIndex:15,
                   }}>
-                    <div style={{ position:'absolute', inset:0, width:'100%', height:'100%', overflow:'auto' }}>
+                    <div style={{
+                      position:'absolute', top:0, left:0,
+                      width:430, height:932,
+                      transform:`scale(${226/430})`,
+                      transformOrigin:'top left',
+                    }}>
                       <TemplateRenderer templateId={templateId} data={data} />
                     </div>
                     {/* Home indicator */}
@@ -730,6 +743,7 @@ export default function WebsiteBuilder() {
                       width:68, height:4,
                       background:'rgba(255,255,255,0.3)',
                       borderRadius:100, zIndex:5,
+                      pointerEvents:'none',
                     }} />
                   </div>
 

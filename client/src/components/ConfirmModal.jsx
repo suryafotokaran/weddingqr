@@ -6,11 +6,11 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 min-h-screen">
       {/* Backdrop */}
-      <div 
+      <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
         onClick={onCancel}
       />
-      
+
       {/* Modal */}
       <div className="relative bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 fade-in duration-200">
         <div className="p-6">
@@ -18,14 +18,14 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isDestructive ? 'bg-red-50 text-red-500' : 'bg-teal-50 text-teal-500'}`}>
               <AlertTriangle size={24} />
             </div>
-            <button 
+            <button
               onClick={onCancel}
               className="text-zinc-400 hover:text-zinc-600 transition-colors bg-zinc-50 hover:bg-zinc-100 rounded-full p-2"
             >
               <X size={16} />
             </button>
           </div>
-          
+
           <h3 className="text-xl font-bold text-zinc-900 mb-2 tracking-tight">{title}</h3>
           <p className="text-sm text-zinc-500 leading-relaxed mb-8 whitespace-pre-wrap">
             {message}
@@ -43,8 +43,8 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
                 onConfirm();
               }}
               className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold text-white transition-all active:scale-95 shadow-lg ${
-                isDestructive 
-                  ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20' 
+                isDestructive
+                  ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20'
                   : 'bg-teal-600 hover:bg-teal-700 shadow-teal-500/20'
               }`}
             >
