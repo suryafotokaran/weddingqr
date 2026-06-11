@@ -1215,6 +1215,18 @@
 
 <body>
 
+<!-- ── Language Switcher ── -->
+<div id="lang-switcher" style="display:inline-flex;position:fixed;top:1rem;left:1rem;z-index:9999;gap:0.3rem;padding:0.3rem;border-radius:999px;background:rgba(20,10,5,0.88);backdrop-filter:blur(14px);box-shadow:0 8px 28px rgba(0,0,0,0.4);border:1px solid rgba(201,169,110,0.4);">
+  <button type="button" data-lang-choice="en" class="ls-btn is-active">English</button>
+  <button type="button" data-lang-choice="ta" class="ls-btn">தமிழ்</button>
+</div>
+<style>
+#lang-switcher .ls-btn{border:0;padding:0.5rem 1rem;border-radius:999px;background:transparent;color:rgba(201,169,110,0.8);font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background .25s,color .25s;white-space:nowrap}
+#lang-switcher .ls-btn.is-active{background:#f4e8c1;color:#1a0f0a;box-shadow:0 2px 8px rgba(0,0,0,0.15)}
+#lang-switcher .ls-btn:hover:not(.is-active):not(:disabled){color:#fff;background:rgba(255,255,255,0.08)}
+#lang-switcher .ls-btn:disabled{opacity:0.55;cursor:wait}
+</style>
+
     <!-- Navigation dots -->
     <nav class="nav-dots" aria-label="Page sections">
         <div class="nav-dot active" onclick="scrollToSection(0)" title="Hero"></div>
@@ -1938,7 +1950,21 @@
                 setTimeout(() => heart.remove(), 4000);
             });
         });
+
+        // ── Language support ──
+        window.addEventListener('message', function(e) {
+            if (!e.data || e.data.type !== 'UPDATE_DATA') return;
+            var d = e.data.data;
+            if (d && d.languages && window.WeddingTranslate) {
+                window.WeddingTranslate.reset();
+                window.WeddingTranslate.buildSwitcher(
+                    document.getElementById('lang-switcher'),
+                    d.languages.selected || ['en']
+                );
+            }
+        });
     </script>
+    <script src="translate.js"></script>
 </body>
 
 </html>

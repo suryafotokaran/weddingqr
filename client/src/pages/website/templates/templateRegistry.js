@@ -11,24 +11,33 @@
 export const TEMPLATES = [
   {
     id: 'template1',
-    name: 'Classic Gold',
+    name: 'Sacred Grace',
     description: 'Rich dark tones with gold accents. Mandala rings & falling petals.',
-    thumbnail: '🏵️',
-    colors: ['#1A0F0A', '#C9A96E', '#FAF6EF'],
+    thumbnail: '✝️',
   },
   {
     id: 'template2',
-    name: 'Emerald & Gold',
+    name: 'Crescent & Gold',
     description: 'Deep emerald with gold Islamic geometric patterns, stars & lanterns.',
-    thumbnail: '🪔',
-    colors: ['#0D3020', '#C8A84B', '#FDFAF3'],
+    thumbnail: '🌙',
   },
   {
     id: 'template3',
-    name: 'Sacred Temple Night',
+    name: 'Vedic Mandap',
     description: 'Midnight black with marigold flames, temple shikhara & Vedic aesthetics.',
     thumbnail: '🛕',
-    colors: ['#0D0500', '#F4813A', '#FDC757'],
+  },
+  {
+    id: 'template4',
+    name: 'Modern Luxe',
+    description: 'Dark teal with floating lanterns, floral event cards, gallery slider & countdown.',
+    thumbnail: '🏮',
+  },
+  {
+    id: 'template5',
+    name: 'Temple Kolam',
+    description: 'Deep crimson & gold with temple background, kolam patterns and Cinzel headings.',
+    thumbnail: '🛕',
   },
 ];
 
@@ -108,6 +117,11 @@ export const DEFAULT_DATA = {
     enabled: true,
     message: 'Your presence, blessings, and love make our wedding day the most beautiful chapter of our lives. From the bottom of our hearts — thank you.',
   },
+  languages: {
+    enabled: true,
+    // English is always on. Tamil is on by default. Others are opt-in.
+    selected: ['en', 'ta'],
+  },
 };
 
 export const SECTIONS = [
@@ -120,4 +134,5 @@ export const SECTIONS = [
   { key: 'gallery',   label: 'Gallery',    icon: 'Images' },
   { key: 'wishes',    label: 'Wishes',     icon: 'MessageCircleHeart' },
   { key: 'thankyou',  label: 'Thank You',  icon: 'Heart' },
+  { key: 'languages', label: 'Languages',  icon: 'Globe',      required: true },
 ];

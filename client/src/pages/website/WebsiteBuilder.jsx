@@ -230,7 +230,70 @@ function ThankyouForm({ data, onChange }) {
   return <Field label="Thank You Message" value={ty.message || ''} onChange={v => onChange({ ...data, thankyou: { ...ty, message: v } })} multiline />;
 }
 
-const SECTION_FORMS = { hero: HeroForm, schedule: ScheduleForm, venue: VenueForm, location: LocationForm, family: FamilyForm, gallery: GalleryForm, thankyou: ThankyouForm };
+const ALL_LANGS = [
+  { code: 'en', label: 'English',    native: 'English',   flag: '🇬🇧' },
+  { code: 'ta', label: 'Tamil',      native: 'தமிழ்',     flag: '🇮🇳' },
+  { code: 'hi', label: 'Hindi',      native: 'हिंदी',      flag: '🇮🇳' },
+  { code: 'kn', label: 'Kannada',    native: 'ಕನ್ನಡ',     flag: '🇮🇳' },
+  { code: 'te', label: 'Telugu',     native: 'తెలుగు',    flag: '🇮🇳' },
+  { code: 'ml', label: 'Malayalam',  native: 'മലയാളം',    flag: '🇮🇳' },
+];
+
+function LanguagesForm({ data, onChange }) {
+  const langs = data.languages || {};
+  const selected = langs.selected || ['en', 'ta'];
+
+  const toggle = (code) => {
+    if (code === 'en') return; // English is always on
+    const next = selected.includes(code)
+      ? selected.filter(l => l !== code)
+      : [...selected, code];
+    onChange({ ...data, languages: { ...langs, selected: next } });
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-zinc-400 leading-relaxed mb-3">
+        Guests can switch the website language. You only type in English — we auto-translate everything.
+      </p>
+      {ALL_LANGS.map(({ code, label, native, flag }) => {
+        const isOn = selected.includes(code);
+        const locked = code === 'en';
+        return (
+          <button
+            key={code}
+            type="button"
+            onClick={() => toggle(code)}
+            disabled={locked}
+            className="w-full flex items-center gap-3 rounded-xl border-2 px-3 py-2.5 text-left transition-all"
+            style={isOn
+              ? { borderColor: '#e8708a', background: 'linear-gradient(135deg,#fff5f7,#fffaf5)' }
+              : { borderColor: '#f0f0f0', background: '#fafafa' }
+            }
+          >
+            <span className="text-lg leading-none">{flag}</span>
+            <span className="flex-1">
+              <span className="block text-sm font-bold text-zinc-800">{label}</span>
+              <span className="block text-[11px] text-zinc-400">{native}</span>
+            </span>
+            {locked
+              ? <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Default</span>
+              : <div className="relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-all duration-200"
+                  style={isOn
+                    ? { background: 'linear-gradient(135deg,#e8708a,#c9956c)', boxShadow: '0 2px 8px rgba(232,112,138,.35)' }
+                    : { background: '#d1d5db' }
+                  }>
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${isOn ? 'translate-x-4' : 'translate-x-1'}`} />
+                </div>
+            }
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const SECTION_FORMS = { hero: HeroForm, schedule: ScheduleForm, venue: VenueForm, location: LocationForm, family: FamilyForm, gallery: GalleryForm, thankyou: ThankyouForm, languages: LanguagesForm };
 
 // Pass userId + eventName to GalleryForm via a wrapper so it can upload to the right path
 function makeGalleryForm(userId, eventName) {
@@ -260,6 +323,7 @@ export default function WebsiteBuilder() {
   const [activeSection, setActiveSection] = useState(null);
   const [copied, setCopied] = useState(false);
   const [mobileTab, setMobileTab] = useState('edit');
+  const [templateCategory, setTemplateCategory] = useState('modern');
   const [previewMode, setPreviewMode] = useState('phone');
   const [slug, setSlug] = useState('');
   const [eventUserId, setEventUserId] = useState('');
@@ -509,37 +573,64 @@ export default function WebsiteBuilder() {
           <div className="flex-1 overflow-y-auto">
 
             {/* ── Template Picker ── */}
-            <div className="p-4 border-b border-zinc-100">
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 mb-3">Choose Template</p>
-              <div className="grid grid-cols-2 gap-2.5">
-                {TEMPLATES.map(tpl => (
-                  <button
-                    key={tpl.id}
-                    onClick={() => handleTemplateChange(tpl.id)}
-                    className="relative rounded-2xl border-2 p-3.5 text-left transition-all duration-200"
-                    style={templateId === tpl.id
-                      ? { borderColor: '#e8708a', background: 'linear-gradient(135deg, #fff5f7 0%, #fffaf5 100%)', boxShadow: '0 4px 16px rgba(232,112,138,0.15)' }
-                      : { borderColor: '#f0f0f0', background: '#fafafa' }
-                    }
-                  >
-                    <div className="text-2xl mb-2 leading-none">{tpl.thumbnail}</div>
-                    <div className="text-[11px] font-bold text-zinc-800 leading-tight mb-2">{tpl.name}</div>
-                    <div className="flex gap-1.5">
-                      {tpl.colors.map((c, i) => (
-                        <div key={i} style={{ background: c }}
-                          className="w-3 h-3 rounded-full border-2 border-white shadow-sm" />
-                      ))}
-                    </div>
-                    {templateId === tpl.id && (
-                      <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full flex items-center justify-center shadow-md"
-                        style={{ background: 'linear-gradient(135deg, #e8708a, #c9956c)' }}>
-                        <Check size={10} className="text-white" />
-                      </div>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {(() => {
+              const CATEGORIES = [
+                { id: 'modern',    label: 'Modern',    emoji: '🏮' },
+                { id: 'hindu',     label: 'Hindu',     emoji: '🛕' },
+                { id: 'muslim',    label: 'Muslim',    emoji: '🌙' },
+                { id: 'christian', label: 'Christian', emoji: '✝️' },
+              ];
+              const CATEGORY_MAP = {
+                modern:    ['template4'],
+                hindu:     ['template3', 'template5'],
+                muslim:    ['template2'],
+                christian: ['template1'],
+              };
+              const visibleTemplates = TEMPLATES.filter(t => (CATEGORY_MAP[templateCategory] || []).includes(t.id));
+              return (
+                <div className="p-4 border-b border-zinc-100">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 mb-3">Choose Template</p>
+                  <div className="flex gap-1.5 mb-3">
+                    {CATEGORIES.map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setTemplateCategory(cat.id)}
+                        className="flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl text-[9px] font-bold transition-all duration-200 border"
+                        style={templateCategory === cat.id
+                          ? { background: 'linear-gradient(135deg, #e8708a 0%, #c9956c 100%)', borderColor: 'transparent', color: '#fff', boxShadow: '0 2px 8px rgba(232,112,138,0.3)' }
+                          : { background: '#f5f5f5', borderColor: '#ebebeb', color: '#71717a' }
+                        }
+                      >
+                        <span className="text-base leading-none">{cat.emoji}</span>
+                        <span>{cat.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {visibleTemplates.map(tpl => (
+                      <button
+                        key={tpl.id}
+                        onClick={() => handleTemplateChange(tpl.id)}
+                        className="relative rounded-2xl border-2 p-3.5 text-left transition-all duration-200"
+                        style={templateId === tpl.id
+                          ? { borderColor: '#e8708a', background: 'linear-gradient(135deg, #fff5f7 0%, #fffaf5 100%)', boxShadow: '0 4px 16px rgba(232,112,138,0.15)' }
+                          : { borderColor: '#f0f0f0', background: '#fafafa' }
+                        }
+                      >
+                        <div className="text-2xl mb-2 leading-none">{tpl.thumbnail}</div>
+                        <div className="text-[11px] font-bold text-zinc-800 leading-tight">{tpl.name}</div>
+                        {templateId === tpl.id && (
+                          <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full flex items-center justify-center shadow-md"
+                            style={{ background: 'linear-gradient(135deg, #e8708a, #c9956c)' }}>
+                            <Check size={10} className="text-white" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── Sections ── */}
             <div className="p-4">
@@ -828,6 +919,43 @@ export default function WebsiteBuilder() {
           </div>
         </main>
       </div>
+
+      {/* ─────────── MOBILE TEMPLATE STRIP (preview tab only) ─────────── */}
+      {mobileTab === 'preview' && (
+        <div
+          className="md:hidden shrink-0 overflow-x-auto flex gap-2.5 px-3 py-2.5"
+          style={{
+            background: 'rgba(10,10,15,0.97)',
+            borderTop: '1px solid rgba(255,255,255,0.07)',
+            backdropFilter: 'blur(24px)',
+            scrollbarWidth: 'none',
+          }}
+        >
+          {TEMPLATES.map(tpl => (
+            <button
+              key={tpl.id}
+              onClick={() => handleTemplateChange(tpl.id)}
+              className="flex flex-col items-center gap-1 shrink-0 transition-all duration-200"
+            >
+              <div
+                className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl border-2 transition-all"
+                style={templateId === tpl.id
+                  ? { borderColor: '#e8708a', background: 'rgba(232,112,138,0.15)', boxShadow: '0 0 12px rgba(232,112,138,0.3)' }
+                  : { borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.05)' }
+                }
+              >
+                {tpl.thumbnail}
+              </div>
+              <span
+                className="text-[9px] font-bold tracking-wide whitespace-nowrap"
+                style={{ color: templateId === tpl.id ? '#e8708a' : '#52525b' }}
+              >
+                {tpl.name}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ─────────── MOBILE BOTTOM NAV ─────────── */}
       <div

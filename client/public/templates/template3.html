@@ -20,127 +20,18 @@ html{scroll-behavior:smooth;}
 body{background:#0D0500;color:var(--dp);font-family:'Josefin Sans',sans-serif;font-weight:300;max-width:430px;margin:0 auto;overflow-x:hidden;}
 
 /* ============================
-   HERO - FULL TEMPLE SCENE
+   HERO - TEMPLE IMAGE BACKGROUND
    ============================ */
 #hero{
   min-height:100vh;position:relative;overflow:hidden;
-  background:linear-gradient(180deg,#000000 0%,#0D0200 20%,#1A0500 50%,#2D0A00 80%,#1A0500 100%);
+  background:url('./template3.png') center center / cover no-repeat;
   display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
   padding-bottom:80px;text-align:center;
 }
-
-/* SKY with stars */
-.sky{position:absolute;inset:0;overflow:hidden;}
-.star{position:absolute;background:#fff;border-radius:50%;animation:twinkle ease-in-out infinite;}
-@keyframes twinkle{0%,100%{opacity:.15;transform:scale(1);}50%{opacity:1;transform:scale(1.6);}}
-
-/* Moon */
-.moon{
-  position:absolute;top:40px;right:50px;
-  width:55px;height:55px;
-  border-radius:50%;
-  background:radial-gradient(circle at 35% 35%,#FFF8DC,#F5DEB3);
-  box-shadow:0 0 30px 10px rgba(255,248,200,0.2),0 0 80px 30px rgba(255,220,100,0.08);
-  animation:moonFloat 8s ease-in-out infinite;
-}
-.moon::after{
-  content:'';position:absolute;top:8px;left:14px;
-  width:22px;height:22px;border-radius:50%;
-  background:rgba(200,170,80,0.25);
-}
-@keyframes moonFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
-
-/* TEMPLE STRUCTURE */
-.temple-scene{
-  position:absolute;bottom:0;left:0;right:0;
-  height:75vh;pointer-events:none;
-}
-.temple-scene svg{width:100%;height:100%;}
-
-/* Temple glow/spotlight */
-.temple-glow{
-  position:absolute;bottom:0;left:50%;transform:translateX(-50%);
-  width:300px;height:400px;
-  background:radial-gradient(ellipse at 50% 100%,rgba(232,98,26,0.18) 0%,rgba(245,166,35,0.08) 40%,transparent 70%);
+#hero::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,0.25) 0%,rgba(13,5,0,0.55) 60%,rgba(13,5,0,0.80) 100%);
   pointer-events:none;
-  animation:templeGlow 4s ease-in-out infinite;
-}
-@keyframes templeGlow{0%,100%{opacity:0.7;}50%{opacity:1;}}
-
-/* FIRE / FLAMES on temple */
-.flame-wrap{position:absolute;bottom:0;pointer-events:none;}
-.flame-wrap.fl1{left:calc(50% - 145px);bottom:42vh;}
-.flame-wrap.fl2{left:calc(50% + 115px);bottom:42vh;}
-.flame-wrap.fl3{left:calc(50% - 4px);bottom:48vh;}
-
-.flame{
-  position:relative;width:18px;height:32px;
-  border-radius:50% 50% 20% 20%;
-  background:linear-gradient(180deg,#fff9c4 0%,#FFD700 20%,#FF8C00 55%,#FF4500 80%,transparent 100%);
-  animation:flameDance 0.4s ease-in-out infinite alternate;
-  filter:blur(0.5px);
-  transform-origin:bottom center;
-}
-.flame::before{
-  content:'';position:absolute;top:4px;left:3px;right:3px;bottom:0;
-  border-radius:50% 50% 20% 20%;
-  background:linear-gradient(180deg,#fff 0%,#FFE066 30%,#FF6600 70%,transparent 100%);
-  animation:flameDance2 0.3s ease-in-out infinite alternate;
-}
-.flame::after{
-  content:'';position:absolute;top:1px;left:6px;right:6px;bottom:4px;
-  border-radius:50%;
-  background:linear-gradient(180deg,#fff 0%,#fffde0 60%,transparent 100%);
-}
-.flame.sm{width:12px;height:22px;}
-.flame.lg{width:24px;height:42px;}
-
-@keyframes flameDance{
-  0%{transform:scaleX(0.9) scaleY(1) rotate(-3deg);}
-  100%{transform:scaleX(1.1) scaleY(1.08) rotate(3deg);}
-}
-@keyframes flameDance2{
-  0%{transform:scaleX(1.1) rotate(2deg);}
-  100%{transform:scaleX(0.9) rotate(-2deg);}
-}
-
-/* Flame glow aura */
-.flame-glow{
-  position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);
-  width:40px;height:40px;border-radius:50%;
-  background:radial-gradient(circle,rgba(255,140,0,0.6),transparent 70%);
-  animation:flameGlowPulse 0.5s ease-in-out infinite alternate;
-}
-@keyframes flameGlowPulse{0%{opacity:.6;transform:translateX(-50%) scale(0.9);}100%{opacity:1;transform:translateX(-50%) scale(1.2);}}
-
-/* Sparks */
-.spark{
-  position:absolute;width:2px;height:2px;border-radius:50%;
-  background:#FFD700;animation:sparkFly linear infinite;
-}
-@keyframes sparkFly{
-  0%{opacity:1;transform:translate(0,0) scale(1);}
-  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(0);}
-}
-
-/* Floating petals */
-.petal{
-  position:absolute;top:-20px;
-  font-size:14px;opacity:0;
-  animation:petalDrop linear infinite;
-}
-@keyframes petalDrop{
-  0%{opacity:0;transform:translateY(0) rotate(0deg) translateX(0);}
-  10%{opacity:.9;}
-  90%{opacity:.4;}
-  100%{opacity:0;transform:translateY(110vh) rotate(720deg) translateX(var(--wx,0px));}
-}
-
-/* Marigold garland */
-.garland{
-  position:absolute;top:0;left:0;right:0;height:5px;
-  background:repeating-linear-gradient(90deg,#E8621A 0,#E8621A 8px,#F5A623 8px,#F5A623 16px,#FFD700 16px,#FFD700 24px,#E8621A 24px);
-  opacity:0.6;
 }
 
 /* Hero content overlay */
@@ -557,6 +448,18 @@ section{padding:72px 24px;position:relative;overflow:hidden;}
 </head>
 <body>
 
+<!-- ── Language Switcher ── -->
+<div id="lang-switcher" style="display:inline-flex;position:fixed;top:1rem;left:1rem;z-index:9999;gap:0.3rem;padding:0.3rem;border-radius:999px;background:rgba(8,3,0,0.92);backdrop-filter:blur(14px);box-shadow:0 8px 28px rgba(0,0,0,0.4);border:1px solid rgba(244,129,58,0.35);">
+  <button type="button" data-lang-choice="en" class="ls-btn is-active">English</button>
+  <button type="button" data-lang-choice="ta" class="ls-btn">தமிழ்</button>
+</div>
+<style>
+#lang-switcher .ls-btn{border:0;padding:0.5rem 1rem;border-radius:999px;background:transparent;color:rgba(244,129,58,0.85);font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;transition:background .25s,color .25s;white-space:nowrap}
+#lang-switcher .ls-btn.is-active{background:#fdf6ee;color:#3a1500;box-shadow:0 2px 8px rgba(0,0,0,0.15)}
+#lang-switcher .ls-btn:hover:not(.is-active):not(:disabled){color:#fff;background:rgba(255,255,255,0.08)}
+#lang-switcher .ls-btn:disabled{opacity:0.55;cursor:wait}
+</style>
+
 <!-- NAV -->
 <nav class="nav-dots">
   <div class="nd act" onclick="gs(0)"></div>
@@ -572,190 +475,6 @@ section{padding:72px 24px;position:relative;overflow:hidden;}
 
 <!-- ======= HERO ======= -->
 <section id="hero">
-  <!-- Sky + stars -->
-  <div class="sky" id="sky"></div>
-  <div class="moon"></div>
-
-  <!-- Garland strip -->
-  <div class="garland"></div>
-
-  <!-- Temple SVG scene -->
-  <div class="temple-scene">
-    <svg viewBox="0 0 430 580" preserveAspectRatio="xMidYMax meet" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="tg1" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#5C1A00"/>
-          <stop offset="100%" stop-color="#2D0A00"/>
-        </linearGradient>
-        <linearGradient id="tg2" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#7A2800"/>
-          <stop offset="100%" stop-color="#3A1205"/>
-        </linearGradient>
-        <linearGradient id="tgold" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#ECC97A"/>
-          <stop offset="100%" stop-color="#A87820"/>
-        </linearGradient>
-        <linearGradient id="tflame" x1="0%" y1="100%" x2="0%" y2="0%">
-          <stop offset="0%" stop-color="rgba(255,69,0,0)"/>
-          <stop offset="40%" stop-color="#FF4500"/>
-          <stop offset="70%" stop-color="#FF8C00"/>
-          <stop offset="100%" stop-color="#FFD700"/>
-        </linearGradient>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="3" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-        <filter id="fglow">
-          <feGaussianBlur stdDeviation="2" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-
-      <!-- === GROUND === -->
-      <rect x="0" y="555" width="430" height="30" fill="#1A0500"/>
-      <rect x="0" y="550" width="430" height="10" fill="url(#tg1)" opacity=".6"/>
-
-      <!-- === SIDE COLUMNS LEFT === -->
-      <rect x="20" y="380" width="28" height="175" fill="url(#tg1)"/>
-      <rect x="18" y="378" width="32" height="6" fill="url(#tgold)"/>
-      <rect x="18" y="544" width="32" height="6" fill="url(#tgold)"/>
-      <!-- column detail -->
-      <rect x="22" y="390" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="405" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="420" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="435" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="450" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="465" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="480" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="495" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="510" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="22" y="525" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <!-- capital -->
-      <polygon points="14,378 50,378 46,368 18,368" fill="url(#tg2)"/>
-      <polygon points="18,368 46,368 44,358 20,358" fill="url(#tg1)"/>
-
-      <!-- === SIDE COLUMNS RIGHT === -->
-      <rect x="382" y="380" width="28" height="175" fill="url(#tg1)"/>
-      <rect x="380" y="378" width="32" height="6" fill="url(#tgold)"/>
-      <rect x="380" y="544" width="32" height="6" fill="url(#tgold)"/>
-      <rect x="384" y="390" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="405" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="420" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="435" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="450" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="465" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="480" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="495" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="510" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <rect x="384" y="525" width="24" height="3" fill="rgba(212,168,67,.2)"/>
-      <polygon points="380,378 416,378 412,368 384,368" fill="url(#tg2)"/>
-      <polygon points="384,368 412,368 410,358 386,358" fill="url(#tg1)"/>
-
-      <!-- === MAIN BODY === -->
-      <rect x="60" y="420" width="310" height="135" fill="url(#tg1)"/>
-      <!-- arch entrance -->
-      <path d="M170,555 L170,460 Q170,420 215,420 Q260,420 260,460 L260,555 Z" fill="#0D0500"/>
-      <!-- arch border -->
-      <path d="M170,555 L170,460 Q170,420 215,420 Q260,420 260,460 L260,555" fill="none" stroke="url(#tgold)" stroke-width="1.5"/>
-      <!-- arch jali circles -->
-      <circle cx="215" cy="435" r="10" fill="none" stroke="rgba(212,168,67,.4)" stroke-width="1"/>
-      <circle cx="215" cy="435" r="6" fill="none" stroke="rgba(212,168,67,.25)" stroke-width=".8"/>
-      <!-- side arches small -->
-      <path d="M70,555 L70,480 Q70,452 92,452 Q114,452 114,480 L114,555 Z" fill="rgba(13,5,0,.8)"/>
-      <path d="M70,555 L70,480 Q70,452 92,452 Q114,452 114,480 L114,555" fill="none" stroke="rgba(212,168,67,.3)" stroke-width="1"/>
-      <path d="M316,555 L316,480 Q316,452 338,452 Q360,452 360,480 L360,555 Z" fill="rgba(13,5,0,.8)"/>
-      <path d="M316,555 L316,480 Q316,452 338,452 Q360,452 338,452 L316,555" fill="none" stroke="rgba(212,168,67,.3)" stroke-width="1"/>
-      <!-- horizontal entablature -->
-      <rect x="54" y="414" width="322" height="12" fill="url(#tg2)"/>
-      <rect x="52" y="410" width="326" height="6" fill="url(#tgold)" opacity=".7"/>
-      <!-- decorative frieze -->
-      <rect x="58" y="418" width="314" height="4" fill="none" stroke="rgba(212,168,67,.25)" stroke-width=".5"/>
-      <!-- repeated motifs on frieze -->
-      <text x="90" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-      <text x="120" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-      <text x="150" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-      <text x="180" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-      <text x="215" y="423" fill="rgba(212,168,67,.5)" font-size="8" text-anchor="middle">🔶</text>
-      <text x="250" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-      <text x="280" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-      <text x="310" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-      <text x="340" y="423" fill="rgba(212,168,67,.3)" font-size="6" text-anchor="middle">✦</text>
-
-      <!-- === SHIKHARA (SPIRE LEVELS) === -->
-      <!-- Level 1 -->
-      <polygon points="80,414 350,414 330,368 100,368" fill="url(#tg2)"/>
-      <polygon points="80,414 350,414 330,370 100,370" fill="none" stroke="rgba(212,168,67,.3)" stroke-width=".8"/>
-      <!-- Level 2 -->
-      <polygon points="108,368 322,368 304,326 126,326" fill="url(#tg1)"/>
-      <rect x="106" y="362" width="218" height="6" fill="url(#tgold)" opacity=".6"/>
-      <!-- Level 3 -->
-      <polygon points="136,326 294,326 278,290 152,290" fill="url(#tg2)"/>
-      <rect x="134" y="320" width="162" height="6" fill="url(#tgold)" opacity=".55"/>
-      <!-- Level 4 -->
-      <polygon points="162,290 268,290 254,258 176,258" fill="url(#tg1)"/>
-      <rect x="160" y="284" width="110" height="6" fill="url(#tgold)" opacity=".5"/>
-      <!-- Level 5 -->
-      <polygon points="184,258 246,258 234,232 196,232" fill="url(#tg2)"/>
-      <rect x="182" y="252" width="66" height="6" fill="url(#tgold)" opacity=".5"/>
-      <!-- Level 6 -->
-      <polygon points="200,232 230,232 220,210 210,210" fill="url(#tg1)"/>
-      <rect x="198" y="226" width="34" height="6" fill="url(#tgold)" opacity=".5"/>
-      <!-- KALASHA (top pot) -->
-      <ellipse cx="215" cy="208" rx="14" ry="8" fill="url(#tgold)"/>
-      <rect x="211" y="185" width="8" height="24" fill="url(#tgold)"/>
-      <circle cx="215" cy="182" r="12" fill="url(#tgold)" filter="url(#glow)"/>
-      <circle cx="215" cy="182" r="8" fill="#FFF0B0"/>
-      <!-- flag on kalasha -->
-      <line x1="215" y1="170" x2="215" y2="145" stroke="#ECC97A" stroke-width="1"/>
-      <polygon points="215,145 240,152 215,160" fill="var(--s1)" opacity=".9"/>
-
-      <!-- === FLAME TORCHES ON TEMPLE === -->
-      <!-- Left torch -->
-      <rect x="127" y="400" width="6" height="14" fill="#8B4513"/>
-      <ellipse cx="130" cy="400" rx="5" ry="3" fill="#6B3410"/>
-      <!-- Right torch -->
-      <rect x="297" y="400" width="6" height="14" fill="#8B4513"/>
-      <ellipse cx="300" cy="400" rx="5" ry="3" fill="#6B3410"/>
-      <!-- Lamp stands flanking arch -->
-      <rect x="162" y="540" width="6" height="15" fill="#8B4513"/>
-      <ellipse cx="165" cy="540" rx="9" ry="5" fill="#C8691A"/>
-      <rect x="262" y="540" width="6" height="15" fill="#8B4513"/>
-      <ellipse cx="265" cy="540" rx="9" ry="5" fill="#C8691A"/>
-
-      <!-- === BELLS hanging === -->
-      <line x1="110" y1="411" x2="110" y2="418" stroke="#ECC97A" stroke-width=".8"/>
-      <ellipse cx="110" cy="421" rx="5" ry="7" fill="none" stroke="#ECC97A" stroke-width=".8"/>
-      <line x1="320" y1="411" x2="320" y2="418" stroke="#ECC97A" stroke-width=".8"/>
-      <ellipse cx="320" cy="421" rx="5" ry="7" fill="none" stroke="#ECC97A" stroke-width=".8"/>
-
-      <!-- Glow from entrance -->
-      <ellipse cx="215" cy="490" rx="60" ry="40" fill="rgba(232,98,26,.08)"/>
-      <ellipse cx="215" cy="490" rx="30" ry="20" fill="rgba(245,166,35,.08)"/>
-
-      <!-- Light ray from kalasha -->
-      <line x1="215" y1="170" x2="100" y2="0" stroke="rgba(255,220,100,.04)" stroke-width="8"/>
-      <line x1="215" y1="170" x2="215" y2="0" stroke="rgba(255,220,100,.06)" stroke-width="6"/>
-      <line x1="215" y1="170" x2="330" y2="0" stroke="rgba(255,220,100,.04)" stroke-width="8"/>
-    </svg>
-  </div>
-
-  <!-- Animated flame wrappers -->
-  <div class="flame-wrap fl1">
-    <div class="flame sm"></div>
-    <div class="flame-glow"></div>
-  </div>
-  <div class="flame-wrap fl2">
-    <div class="flame sm"></div>
-    <div class="flame-glow"></div>
-  </div>
-  <div class="flame-wrap fl3">
-    <div class="flame lg"></div>
-    <div class="flame-glow" style="width:55px;height:55px;"></div>
-  </div>
-
-  <!-- Temple glow -->
-  <div class="temple-glow"></div>
-
   <!-- Hero content -->
   <div class="hero-content">
     <div class="hero-om">ॐ</div>
@@ -1022,34 +741,6 @@ section{padding:72px 24px;position:relative;overflow:hidden;}
 </section>
 
 <script>
-// ---- STARS ----
-const sky=document.getElementById('sky');
-for(let i=0;i<90;i++){
-  const s=document.createElement('div');s.className='star';
-  const sz=Math.random()*2.5+.5;
-  s.style.cssText=`width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*65}%;animation-duration:${Math.random()*3+2}s;animation-delay:${Math.random()*6}s;`;
-  sky.appendChild(s);
-}
-
-// ---- PETALS ----
-const pe=['🌸','🌺','🌼','🌻'];
-for(let i=0;i<20;i++){
-  const p=document.createElement('div');p.className='petal';
-  const wx=(Math.random()-.5)*80;
-  p.style.cssText=`left:${Math.random()*100}%;font-size:${Math.random()*8+10}px;animation-duration:${Math.random()*10+8}s;animation-delay:${Math.random()*12}s;--wx:${wx}px;`;
-  p.textContent=pe[~~(Math.random()*pe.length)];
-  document.getElementById('hero').appendChild(p);
-}
-
-// ---- SPARKS from flames ----
-const hero=document.getElementById('hero');
-for(let i=0;i<25;i++){
-  const sp=document.createElement('div');sp.className='spark';
-  const dx=(Math.random()-.5)*60,dy=-(Math.random()*80+20);
-  sp.style.cssText=`--dx:${dx}px;--dy:${dy}px;bottom:${42+Math.random()*5}vh;left:${48+Math.random()*4}%;animation-duration:${Math.random()*1+.6}s;animation-delay:${Math.random()*2}s;`;
-  hero.appendChild(sp);
-}
-
 // ---- COUNTDOWN ----
 const wd=new Date('2025-02-14T12:30:00');
 let ct=null;
@@ -1175,6 +866,15 @@ function applyData(d){
 }
 
 window.addEventListener('message',function(e){if(e.data&&e.data.type==='UPDATE_DATA')applyData(e.data.data);});
+window.addEventListener('message',function(e){
+  if(!e.data||e.data.type!=='UPDATE_DATA')return;
+  var d=e.data.data;
+  if(d&&d.languages&&window.WeddingTranslate){
+    window.WeddingTranslate.reset();
+    window.WeddingTranslate.buildSwitcher(document.getElementById('lang-switcher'),d.languages.selected||['en']);
+  }
+});
 </script>
+<script src="translate.js"></script>
 </body>
 </html>
