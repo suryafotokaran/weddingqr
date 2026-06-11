@@ -581,7 +581,7 @@ export default function WebsiteBuilder() {
                 { id: 'christian', label: 'Christian', emoji: '✝️' },
               ];
               const CATEGORY_MAP = {
-                modern:    ['template4'],
+                modern:    ['template4', 'template6', 'template7', 'template8', 'template9'],
                 hindu:     ['template3', 'template5'],
                 muslim:    ['template2'],
                 christian: ['template1'],

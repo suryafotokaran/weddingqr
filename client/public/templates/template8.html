@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wedding Invitation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: Arial, sans-serif;
+  background: #1b232d;
+  color: #f9f1ed;
+  overflow-x: hidden;
+}
+
+/* ── CSS Variables ── */
+:root {
+  --navy:    #1b232d;
+  --slate:   #292f38;
+  --navy2:   #192333;
+  --gold:    #e2cd96;
+  --gold2:   #d4b97c;
+  --cream:   #f8f0ed;
+  --blush:   #ebdad2;
+  --warm:    #f9f1ed;
+  --rose:    #b3998d;
+  --serif:   'Playfair Display', 'Times New Roman', serif;
+  --sans:    Arial, sans-serif;
+}
+
+/* ── Lang Switcher ── */
+#lang-switcher {
+  display: inline-flex;
+  position: fixed; top: 1rem; left: 1rem;
+  z-index: 9999; gap: 0.3rem; padding: 0.3rem;
+  border-radius: 999px;
+  background: rgba(25,35,51,0.92);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  border: 1px solid rgba(226,205,150,0.3);
+}
+#lang-switcher .ls-btn {
+  border: 0; padding: 0.45rem 1rem; border-radius: 999px;
+  background: transparent; color: rgba(226,205,150,0.8);
+  font-family: var(--serif); font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; transition: background .25s, color .25s; white-space: nowrap;
+}
+#lang-switcher .ls-btn.is-active {
+  background: var(--gold); color: var(--navy);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+#lang-switcher .ls-btn:hover:not(.is-active):not(:disabled) {
+  color: #fff; background: rgba(255,255,255,0.1);
+}
+#lang-switcher .ls-btn:disabled { opacity: 0.5; cursor: wait; }
+
+/* ── Category Nav ── */
+#t8-cat-nav {
+  position: sticky; top: 0; z-index: 9998;
+  background: rgba(25,35,51,0.95);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(226,205,150,0.15);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  opacity: 0; transform: translateY(-100%);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+#t8-cat-nav .t8-nav-inner {
+  display: flex; justify-content: center; gap: 4px;
+  padding: 10px 16px; overflow-x: auto;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+#t8-cat-nav .t8-nav-inner::-webkit-scrollbar { display: none; }
+.t8-cat-btn {
+  background: transparent;
+  border: 1px solid rgba(226,205,150,0.25);
+  color: rgba(226,205,150,0.7);
+  padding: 6px 16px; border-radius: 999px;
+  font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+  font-family: var(--serif);
+  transition: all 0.25s ease;
+}
+.t8-cat-btn:hover { background: rgba(226,205,150,0.12); color: var(--gold); border-color: rgba(226,205,150,0.5); }
+.t8-cat-btn.t8-active { background: rgba(226,205,150,0.15); color: var(--gold); border-color: rgba(226,205,150,0.6); font-weight: 600; }
+
+/* ── Scroll Reveal ── */
+.rv {
+  opacity: 0; transform: translateY(36px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+.rv.visible { opacity: 1; transform: none; }
+
+/* ── Divider ── */
+.t8-divider {
+  width: 60px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  margin: 18px auto;
+}
+.t8-section-label {
+  font-family: var(--serif); font-size: 11px;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: var(--gold); opacity: 0.7; text-align: center;
+  margin-bottom: 8px;
+}
+.t8-section-title {
+  font-family: var(--serif); font-size: 30px; font-weight: 400;
+  color: var(--gold); text-align: center; line-height: 1.3;
+}
+
+/* ════════════════════════════════════
+   1. HERO
+════════════════════════════════════ */
+#t8-hero {
+  min-height: 100vh;
+  background: var(--navy);
+  position: relative;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+#t8-hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(0turn, rgba(27,35,45,1) 0%, rgba(27,35,45,0.55) 50%, rgba(10,12,14,0.3) 100%);
+  z-index: 1;
+}
+.t8-hero-content { position: relative; z-index: 2; padding: 40px 24px; }
+.t8-hero-label {
+  font-family: var(--serif); font-size: 13px;
+  letter-spacing: 4px; text-transform: uppercase;
+  color: rgba(226,205,150,0.65); margin-bottom: 24px;
+}
+.t8-hero-names {
+  font-family: var(--serif); font-size: clamp(52px, 10vw, 82px);
+  font-weight: 400; color: var(--gold);
+  line-height: 1.1; letter-spacing: 2px;
+}
+.t8-hero-amp {
+  font-family: var(--serif); font-style: italic;
+  font-size: clamp(36px, 6vw, 54px); color: rgba(226,205,150,0.55);
+  display: block; margin: 8px 0;
+}
+.t8-hero-date {
+  margin-top: 28px;
+  font-family: var(--serif); font-size: clamp(18px, 3vw, 26px);
+  color: var(--gold); letter-spacing: 6px; opacity: 0.85;
+}
+.t8-hero-city {
+  margin-top: 10px;
+  font-family: var(--sans); font-size: 14px;
+  color: rgba(249,241,237,0.55); letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.t8-scroll-hint {
+  position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%);
+  z-index: 2; text-align: center;
+}
+.t8-scroll-hint span {
+  font-family: var(--serif); font-size: 12px;
+  letter-spacing: 2px; color: rgba(226,205,150,0.5);
+  text-transform: uppercase; display: block; margin-bottom: 8px;
+}
+.t8-scroll-hint::after {
+  content: '';
+  display: block; margin: 0 auto;
+  width: 1px; height: 36px;
+  background: linear-gradient(to bottom, rgba(226,205,150,0.5), transparent);
+}
+
+/* ════════════════════════════════════
+   2. GREETING
+════════════════════════════════════ */
+#t8-greeting {
+  background: var(--cream);
+  padding: 80px 24px;
+}
+.t8-greeting-card {
+  max-width: 640px; margin: 0 auto;
+  text-align: center;
+}
+.t8-greeting-card .t8-section-title { color: var(--navy); }
+.t8-greeting-card .t8-divider { background: linear-gradient(90deg, transparent, var(--rose), transparent); }
+.t8-greeting-body {
+  font-family: var(--serif); font-size: 17px; line-height: 1.85;
+  color: #3a2e28; margin-top: 24px; font-style: italic;
+}
+.t8-greeting-sub {
+  font-family: var(--sans); font-size: 14px; line-height: 1.75;
+  color: #5a4a42; margin-top: 16px;
+}
+
+/* ════════════════════════════════════
+   3. COUNTDOWN
+════════════════════════════════════ */
+#t8-countdown {
+  background: var(--slate);
+  padding: 80px 24px;
+  text-align: center;
+}
+#t8-countdown .t8-section-title { color: var(--gold); margin-bottom: 50px; }
+#t8-cd-container {
+  display: flex; justify-content: center; align-items: flex-start;
+  gap: 8px; flex-wrap: wrap;
+}
+.t8-cd-block { text-align: center; min-width: 80px; }
+.t8-cd-num {
+  font-family: var(--serif); font-size: clamp(42px, 8vw, 58px);
+  color: var(--gold); line-height: 1; display: block;
+}
+.t8-cd-label {
+  font-family: var(--serif); font-size: 14px;
+  color: rgba(226,205,150,0.65); margin-top: 8px;
+  letter-spacing: 2px; text-transform: uppercase;
+}
+.t8-cd-sep {
+  font-family: var(--serif); font-size: 52px;
+  color: rgba(226,205,150,0.35); line-height: 1;
+  padding-top: 4px; align-self: flex-start;
+}
+
+/* ════════════════════════════════════
+   4. SCHEDULE
+════════════════════════════════════ */
+#t8-schedule {
+  background: var(--navy);
+  padding: 80px 24px;
+}
+.t8-schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; max-width: 800px; margin: 48px auto 0;
+}
+.t8-event-card {
+  background: var(--slate);
+  border-radius: 10px;
+  padding: 20px 24px;
+  display: flex; align-items: center; gap: 16px;
+  border: 1px solid rgba(226,205,150,0.1);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.t8-event-card:hover {
+  border-color: rgba(226,205,150,0.3);
+  transform: translateY(-2px);
+}
+.t8-event-icon {
+  font-size: 26px; flex-shrink: 0;
+  width: 44px; height: 44px;
+  background: rgba(226,205,150,0.08);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.t8-event-info { flex: 1; }
+.t8-event-name {
+  font-family: var(--serif); font-size: 16px;
+  color: var(--gold); font-weight: 500;
+}
+.t8-event-time {
+  font-family: var(--sans); font-size: 13px;
+  color: rgba(249,241,237,0.55); margin-top: 3px;
+  letter-spacing: 1px;
+}
+.t8-event-desc {
+  font-family: var(--sans); font-size: 12px;
+  color: rgba(249,241,237,0.4); margin-top: 4px;
+  line-height: 1.5;
+}
+
+/* ════════════════════════════════════
+   5. VENUE
+════════════════════════════════════ */
+#t8-venue {
+  background: var(--blush);
+  padding: 80px 24px;
+}
+#t8-venue .t8-section-title { color: var(--navy); }
+#t8-venue .t8-section-label { color: var(--rose); }
+#t8-venue .t8-divider { background: linear-gradient(90deg, transparent, var(--rose), transparent); }
+.t8-venue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px; max-width: 700px; margin: 40px auto 0;
+}
+.t8-venue-card {
+  background: #fff;
+  border-radius: 10px; padding: 24px;
+  text-align: center;
+  box-shadow: 0 4px 20px rgba(100,60,40,0.1);
+}
+.t8-venue-icon { font-size: 32px; margin-bottom: 12px; }
+.t8-venue-name {
+  font-family: var(--serif); font-size: 20px;
+  color: var(--navy); font-weight: 500;
+}
+.t8-venue-address {
+  font-family: var(--sans); font-size: 13px;
+  color: #7a6058; margin-top: 8px; line-height: 1.6;
+}
+.t8-venue-tag {
+  display: inline-block; margin-top: 10px;
+  padding: 3px 12px; border-radius: 999px;
+  background: var(--blush); color: #7a5045;
+  font-size: 11px; letter-spacing: 1px;
+}
+
+/* ════════════════════════════════════
+   6. FAMILY
+════════════════════════════════════ */
+#t8-family {
+  background: var(--slate);
+  padding: 80px 24px;
+  display: none;
+}
+.t8-family-cols {
+  display: flex; gap: 40px; justify-content: center;
+  flex-wrap: wrap; max-width: 700px; margin: 40px auto 0;
+}
+.t8-family-col { flex: 1; min-width: 220px; }
+.t8-family-col-title {
+  font-family: var(--serif); font-size: 13px;
+  letter-spacing: 3px; text-transform: uppercase;
+  color: rgba(226,205,150,0.55); text-align: center;
+  margin-bottom: 16px;
+}
+.t8-member-card {
+  background: rgba(27,35,45,0.6);
+  border-radius: 10px; padding: 14px 16px;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(226,205,150,0.08);
+}
+.t8-member-emoji { font-size: 24px; flex-shrink: 0; }
+.t8-member-name {
+  font-family: var(--serif); font-size: 14px;
+  color: var(--gold); font-weight: 500;
+}
+.t8-member-role {
+  font-family: var(--sans); font-size: 11px;
+  color: rgba(249,241,237,0.45); margin-top: 2px;
+  letter-spacing: 0.5px;
+}
+
+/* ════════════════════════════════════
+   7. GALLERY
+════════════════════════════════════ */
+#t8-gallery {
+  background: var(--navy2);
+  padding: 80px 24px;
+}
+.t8-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px; max-width: 720px; margin: 40px auto 0;
+}
+.t8-gallery-grid .t8-g-tall {
+  grid-row: span 2;
+}
+.t8-gphoto {
+  aspect-ratio: 1;
+  background: var(--slate);
+  border-radius: 8px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px; color: rgba(226,205,150,0.4);
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.t8-gphoto:hover { transform: scale(1.02); }
+.t8-gphoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.t8-g-tall .t8-gphoto { aspect-ratio: unset; height: 100%; }
+
+/* ════════════════════════════════════
+   9. RSVP
+════════════════════════════════════ */
+#t8-rsvp {
+  background: var(--slate);
+  padding: 80px 24px;
+}
+.t8-rsvp-card {
+  max-width: 520px; margin: 0 auto;
+  background: var(--cream); border-radius: 12px;
+  padding: 40px 36px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+}
+.t8-rsvp-card .t8-section-title { color: var(--navy); font-size: 26px; }
+.t8-rsvp-card .t8-divider { background: linear-gradient(90deg, transparent, var(--rose), transparent); }
+.t8-rsvp-sub {
+  text-align: center; font-family: var(--sans); font-size: 14px;
+  color: #7a6058; margin-top: 8px; margin-bottom: 28px; line-height: 1.6;
+}
+.t8-field { margin-bottom: 20px; }
+.t8-field label {
+  display: block; font-family: var(--serif); font-size: 13px;
+  color: #5a4035; letter-spacing: 1px; margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.t8-field input[type="text"] {
+  width: 100%; padding: 12px 16px;
+  border: 1.5px solid #d4c4bc; border-radius: 8px;
+  font-family: var(--sans); font-size: 15px;
+  color: var(--navy); background: #fff;
+  outline: none; transition: border-color 0.2s;
+}
+.t8-field input[type="text"]:focus { border-color: var(--rose); }
+.t8-radio-group { display: flex; gap: 10px; flex-wrap: wrap; }
+.t8-radio-label {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--sans); font-size: 14px; color: #5a4035;
+  cursor: pointer; padding: 8px 14px;
+  border: 1.5px solid #d4c4bc; border-radius: 999px;
+  transition: all 0.2s;
+}
+.t8-radio-label:hover { border-color: var(--rose); background: var(--blush); }
+.t8-radio-label input { display: none; }
+.t8-radio-label.checked { background: var(--rose); border-color: var(--rose); color: #fff; }
+.t8-submit-btn {
+  width: 100%; padding: 14px;
+  background: linear-gradient(135deg, #b3998d, #9a7e70);
+  border: none; border-radius: 8px;
+  font-family: var(--serif); font-size: 15px; letter-spacing: 2px;
+  text-transform: uppercase; color: #fff;
+  cursor: pointer; margin-top: 8px;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.t8-submit-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+/* ════════════════════════════════════
+   10. LOCATION / MAP
+════════════════════════════════════ */
+#t8-location {
+  background: var(--navy);
+  padding: 80px 24px 0;
+}
+.t8-map-frame {
+  margin-top: 40px;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+  height: 380px;
+  background: var(--slate);
+  display: flex; align-items: center; justify-content: center;
+}
+.t8-map-frame iframe {
+  width: 100%; height: 100%;
+  border: none; display: block;
+}
+.t8-map-placeholder {
+  text-align: center;
+  color: rgba(226,205,150,0.3);
+  font-family: var(--serif); font-size: 16px;
+}
+
+/* ════════════════════════════════════
+   11. FOOTER / CONTACT
+════════════════════════════════════ */
+#t8-footer {
+  background: var(--navy2);
+  padding: 60px 24px 80px;
+  text-align: center;
+}
+.t8-footer-message {
+  max-width: 480px; margin: 0 auto;
+  font-family: var(--serif); font-size: 16px;
+  font-style: italic; line-height: 1.8;
+  color: rgba(249,241,237,0.65);
+}
+.t8-footer-names {
+  font-family: var(--serif); font-size: 28px;
+  color: var(--gold); margin-top: 28px;
+  font-weight: 400; letter-spacing: 2px;
+}
+.t8-footer-contact {
+  margin-top: 24px;
+  font-family: var(--sans); font-size: 13px;
+  color: rgba(249,241,237,0.45); letter-spacing: 1px;
+}
+.t8-footer-contact a {
+  color: rgba(226,205,150,0.6); text-decoration: none;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .t8-gallery-grid { grid-template-columns: repeat(2, 1fr); }
+  .t8-rsvp-card { padding: 28px 20px; }
+  .t8-family-cols { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Language Switcher ── -->
+<div id="lang-switcher">
+  <button type="button" data-lang-choice="en" class="ls-btn is-active">English</button>
+</div>
+
+<!-- ── Category Nav ── -->
+<nav id="t8-cat-nav">
+  <div class="t8-nav-inner">
+    <button class="t8-cat-btn" onclick="t8scroll('t8-schedule')">Schedule</button>
+    <button class="t8-cat-btn" onclick="t8scroll('t8-venue')">Venue</button>
+    <button class="t8-cat-btn" onclick="t8scroll('t8-gallery')">Gallery</button>
+    <button class="t8-cat-btn" onclick="t8scroll('t8-rsvp')">RSVP</button>
+    <button class="t8-cat-btn" onclick="t8scroll('t8-location')">Location</button>
+  </div>
+</nav>
+
+<!-- ════ 1. HERO ════ -->
+<section id="t8-hero">
+  <div class="t8-hero-content">
+    <p class="t8-hero-label">You are cordially invited to the wedding of</p>
+    <h1>
+      <span class="t8-hero-names" id="t8-groom-name">Groom</span>
+      <span class="t8-hero-amp">&amp;</span>
+      <span class="t8-hero-names" id="t8-bride-name">Bride</span>
+    </h1>
+    <p class="t8-hero-date" id="t8-hero-date">· · · · · ·</p>
+    <p class="t8-hero-city" id="t8-hero-city"></p>
+  </div>
+  <div class="t8-scroll-hint">
+    <span>Scroll down</span>
+  </div>
+</section>
+
+<!-- ════ 2. GREETING ════ -->
+<section id="t8-greeting">
+  <div class="t8-greeting-card rv">
+    <p class="t8-section-label">With Love</p>
+    <h2 class="t8-section-title">Dear Friends &amp; Family</h2>
+    <div class="t8-divider"></div>
+    <p class="t8-greeting-body" id="t8-tagline">
+      A very special and happy event is going to happen — our wedding!
+    </p>
+    <p class="t8-greeting-sub">
+      We can't imagine this day without our closest people. We are overjoyed to invite you to join and share this wonderful day with us.
+    </p>
+  </div>
+</section>
+
+<!-- ════ 3. COUNTDOWN ════ -->
+<section id="t8-countdown">
+  <p class="t8-section-label rv">The Celebration Begins In</p>
+  <h2 class="t8-section-title rv">Counting Down</h2>
+  <div class="t8-divider rv" style="background:linear-gradient(90deg,transparent,var(--gold),transparent)"></div>
+  <div id="t8-cd-container" class="rv">
+    <div class="t8-cd-block">
+      <span class="t8-cd-num" id="t8-days">00</span>
+      <span class="t8-cd-label">Days</span>
+    </div>
+    <span class="t8-cd-sep">:</span>
+    <div class="t8-cd-block">
+      <span class="t8-cd-num" id="t8-hours">00</span>
+      <span class="t8-cd-label">Hours</span>
+    </div>
+    <span class="t8-cd-sep">:</span>
+    <div class="t8-cd-block">
+      <span class="t8-cd-num" id="t8-minutes">00</span>
+      <span class="t8-cd-label">Minutes</span>
+    </div>
+    <span class="t8-cd-sep">:</span>
+    <div class="t8-cd-block">
+      <span class="t8-cd-num" id="t8-seconds">00</span>
+      <span class="t8-cd-label">Seconds</span>
+    </div>
+  </div>
+</section>
+
+<!-- ════ 4. SCHEDULE ════ -->
+<section id="t8-schedule">
+  <p class="t8-section-label rv">Plan Your Day</p>
+  <h2 class="t8-section-title rv">Schedule of Events</h2>
+  <div class="t8-divider rv" style="background:linear-gradient(90deg,transparent,var(--gold),transparent)"></div>
+  <div class="t8-schedule-grid" id="t8-schedule-grid">
+    <div class="t8-event-card rv">
+      <div class="t8-event-icon">🌸</div>
+      <div class="t8-event-info">
+        <div class="t8-event-name">Mehendi Ceremony</div>
+        <div class="t8-event-time">08:00 AM</div>
+        <div class="t8-event-desc">Traditional henna art and music</div>
+      </div>
+    </div>
+    <div class="t8-event-card rv">
+      <div class="t8-event-icon">🪔</div>
+      <div class="t8-event-info">
+        <div class="t8-event-name">Haldi Ritual</div>
+        <div class="t8-event-time">10:00 AM</div>
+        <div class="t8-event-desc">Auspicious turmeric ceremony</div>
+      </div>
+    </div>
+    <div class="t8-event-card rv">
+      <div class="t8-event-icon">💍</div>
+      <div class="t8-event-info">
+        <div class="t8-event-name">Wedding Ceremony</div>
+        <div class="t8-event-time">12:30 PM</div>
+        <div class="t8-event-desc">Sacred vows at the mandap</div>
+      </div>
+    </div>
+    <div class="t8-event-card rv">
+      <div class="t8-event-icon">🍽️</div>
+      <div class="t8-event-info">
+        <div class="t8-event-name">Wedding Feast</div>
+        <div class="t8-event-time">02:30 PM</div>
+        <div class="t8-event-desc">Grand lunch with traditional delicacies</div>
+      </div>
+    </div>
+    <div class="t8-event-card rv">
+      <div class="t8-event-icon">🎶</div>
+      <div class="t8-event-info">
+        <div class="t8-event-name">Sangeet Night</div>
+        <div class="t8-event-time">07:00 PM</div>
+        <div class="t8-event-desc">Music &amp; dance under the stars</div>
+      </div>
+    </div>
+    <div class="t8-event-card rv">
+      <div class="t8-event-icon">🎉</div>
+      <div class="t8-event-info">
+        <div class="t8-event-name">Reception</div>
+        <div class="t8-event-time">09:00 PM</div>
+        <div class="t8-event-desc">Grand reception and farewell</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ 5. VENUE ════ -->
+<section id="t8-venue">
+  <p class="t8-section-label rv">Where We Celebrate</p>
+  <h2 class="t8-section-title rv">Venue</h2>
+  <div class="t8-divider rv"></div>
+  <div class="t8-venue-grid" id="t8-venue-grid">
+    <div class="t8-venue-card rv">
+      <div class="t8-venue-icon">🏛️</div>
+      <div class="t8-venue-name" id="t8-venue-name">Main Venue</div>
+      <div class="t8-venue-address" id="t8-venue-addr">Enter venue address here</div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ 6. FAMILY ════ -->
+<section id="t8-family">
+  <p class="t8-section-label rv">With Love From</p>
+  <h2 class="t8-section-title rv">Our Families</h2>
+  <div class="t8-divider rv" style="background:linear-gradient(90deg,transparent,var(--gold),transparent)"></div>
+  <div class="t8-family-cols">
+    <div class="t8-family-col">
+      <p class="t8-family-col-title" id="t8-groom-label">Groom's Family</p>
+      <div id="t8-groom-list"></div>
+    </div>
+    <div class="t8-family-col">
+      <p class="t8-family-col-title" id="t8-bride-label">Bride's Family</p>
+      <div id="t8-bride-list"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ 7. GALLERY ════ -->
+<section id="t8-gallery">
+  <p class="t8-section-label rv">Memories</p>
+  <h2 class="t8-section-title rv">Gallery</h2>
+  <div class="t8-divider rv" style="background:linear-gradient(90deg,transparent,var(--gold),transparent)"></div>
+  <div class="t8-gallery-grid rv">
+    <div class="t8-gphoto t8-g-item" data-idx="0">📸</div>
+    <div class="t8-gphoto t8-g-item" data-idx="1">💑</div>
+    <div class="t8-gphoto t8-g-item" data-idx="2">🌹</div>
+    <div class="t8-gphoto t8-g-item" data-idx="3">🏔️</div>
+    <div class="t8-gphoto t8-g-item" data-idx="4">🎊</div>
+    <div class="t8-gphoto t8-g-item" data-idx="5">✨</div>
+  </div>
+</section>
+
+<!-- ════ 9. RSVP ════ -->
+<section id="t8-rsvp">
+  <div class="t8-rsvp-card rv">
+    <p class="t8-section-label" style="color:var(--rose)">Kindly Reply</p>
+    <h2 class="t8-section-title">Confirm Attendance</h2>
+    <div class="t8-divider"></div>
+    <p class="t8-rsvp-sub">To help us prepare for a joyful celebration, please confirm your attendance below.</p>
+    <form id="t8-rsvp-form" onsubmit="t8submitRSVP(event)">
+      <div class="t8-field">
+        <label>Your Name</label>
+        <input type="text" id="t8-rsvp-name" placeholder="Enter your full name" required>
+      </div>
+      <div class="t8-field">
+        <label>Will you attend?</label>
+        <div class="t8-radio-group" id="t8-attend-group">
+          <label class="t8-radio-label checked">
+            <input type="radio" name="t8_attend" value="yes" checked> Yes, I'll be there
+          </label>
+          <label class="t8-radio-label">
+            <input type="radio" name="t8_attend" value="no"> Regretfully No
+          </label>
+        </div>
+      </div>
+      <button type="submit" class="t8-submit-btn">Send RSVP</button>
+    </form>
+    <p id="t8-rsvp-thanks" style="display:none;text-align:center;font-family:var(--serif);color:var(--rose);margin-top:16px;font-style:italic;">
+      Thank you! We look forward to celebrating with you. ✨
+    </p>
+  </div>
+</section>
+
+<!-- ════ 10. LOCATION ════ -->
+<section id="t8-location">
+  <p class="t8-section-label rv">Find Us</p>
+  <h2 class="t8-section-title rv">Location</h2>
+  <div class="t8-divider rv" style="background:linear-gradient(90deg,transparent,var(--gold),transparent)"></div>
+  <div class="t8-map-frame rv" id="t8-map-frame">
+    <div class="t8-map-placeholder">
+      <div style="font-size:40px;margin-bottom:12px">📍</div>
+      <div id="t8-map-label">Map will appear here</div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ 11. FOOTER ════ -->
+<footer id="t8-footer">
+  <p class="t8-footer-message" id="t8-thankyou-msg">
+    Your presence, blessings, and love make our wedding day the most beautiful chapter of our lives. From the bottom of our hearts — thank you.
+  </p>
+  <div class="t8-footer-names" id="t8-footer-names">Groom &amp; Bride</div>
+  <div class="t8-footer-contact" id="t8-footer-contact"></div>
+</footer>
+
+<script>
+// ── Scroll reveal ──
+(function() {
+  var obs = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.rv').forEach(function(el) { obs.observe(el); });
+})();
+
+// ── Category nav show/hide + active ──
+(function() {
+  var nav = document.getElementById('t8-cat-nav');
+  var sections = ['t8-schedule','t8-venue','t8-gallery','t8-rsvp','t8-location'];
+  var visible = false;
+
+  window.addEventListener('scroll', function() {
+    var schedEl = document.getElementById('t8-schedule');
+    if (!schedEl) return;
+    var show = schedEl.getBoundingClientRect().top <= 60;
+    if (show !== visible) {
+      visible = show;
+      nav.style.opacity = show ? '1' : '0';
+      nav.style.transform = show ? 'translateY(0)' : 'translateY(-100%)';
+    }
+    // active state
+    var active = null;
+    var mid = window.innerHeight * 0.45;
+    for (var i = sections.length - 1; i >= 0; i--) {
+      var el = document.getElementById(sections[i]);
+      if (el && el.getBoundingClientRect().top <= mid) { active = sections[i]; break; }
+    }
+    document.querySelectorAll('.t8-cat-btn').forEach(function(btn, idx) {
+      btn.classList.toggle('t8-active', sections[idx] === active);
+    });
+  }, { passive: true });
+})();
+
+window.t8scroll = function(id) {
+  var el = document.getElementById(id);
+  if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.pageYOffset - 50, behavior: 'smooth' });
+};
+
+// ── Countdown ──
+var _t8CdTarget = null;
+var _t8CdInterval = null;
+
+function t8startCountdown(target) {
+  _t8CdTarget = target;
+  clearInterval(_t8CdInterval);
+  function tick() {
+    var now = new Date();
+    var dist = _t8CdTarget - now;
+    if (dist < 0) {
+      clearInterval(_t8CdInterval);
+      ['t8-days','t8-hours','t8-minutes','t8-seconds'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = '00';
+      });
+      return;
+    }
+    var d = document.getElementById('t8-days');
+    var h = document.getElementById('t8-hours');
+    var m = document.getElementById('t8-minutes');
+    var s = document.getElementById('t8-seconds');
+    if (d) d.textContent = String(Math.floor(dist / 86400000)).padStart(2,'0');
+    if (h) h.textContent = String(Math.floor((dist % 86400000) / 3600000)).padStart(2,'0');
+    if (m) m.textContent = String(Math.floor((dist % 3600000) / 60000)).padStart(2,'0');
+    if (s) s.textContent = String(Math.floor((dist % 60000) / 1000)).padStart(2,'0');
+  }
+  tick();
+  _t8CdInterval = setInterval(tick, 1000);
+}
+
+// ── RSVP radio style ──
+document.querySelectorAll('.t8-radio-group').forEach(function(grp) {
+  grp.querySelectorAll('.t8-radio-label').forEach(function(lbl) {
+    lbl.querySelector('input').addEventListener('change', function() {
+      grp.querySelectorAll('.t8-radio-label').forEach(function(l) { l.classList.remove('checked'); });
+      lbl.classList.add('checked');
+    });
+  });
+});
+
+// ── RSVP submit ──
+window.t8submitRSVP = function(e) {
+  e.preventDefault();
+  document.getElementById('t8-rsvp-form').style.display = 'none';
+  document.getElementById('t8-rsvp-thanks').style.display = 'block';
+};
+
+// ── applyData ──
+function applyData(d) {
+  if (!d) return;
+
+  // Hero
+  if (d.hero) {
+    var groomEl = document.getElementById('t8-groom-name');
+    var brideEl = document.getElementById('t8-bride-name');
+    if (groomEl) groomEl.textContent = d.hero.groomName || 'Groom';
+    if (brideEl) brideEl.textContent = d.hero.brideName || 'Bride';
+
+    if (d.hero.tagline) {
+      var tEl = document.getElementById('t8-tagline');
+      if (tEl) tEl.textContent = d.hero.tagline;
+    }
+
+    if (d.hero.date) {
+      var dt = new Date(d.hero.date);
+      var dateEl = document.getElementById('t8-hero-date');
+      if (dateEl) {
+        dateEl.textContent = dt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
+      }
+      t8startCountdown(new Date(d.hero.date + 'T20:00:00'));
+    }
+
+    if (d.hero.city) {
+      var cityEl = document.getElementById('t8-hero-city');
+      if (cityEl) cityEl.textContent = d.hero.city;
+    }
+
+    document.title = (d.hero.groomName || 'Groom') + ' & ' + (d.hero.brideName || 'Bride') + ' | Wedding Invitation';
+
+    var footerNames = document.getElementById('t8-footer-names');
+    if (footerNames) footerNames.textContent = (d.hero.groomName || 'Groom') + ' & ' + (d.hero.brideName || 'Bride');
+  }
+
+  // Schedule
+  if (d.schedule) {
+    if (d.schedule.enabled === false) {
+      var sch = document.getElementById('t8-schedule');
+      if (sch) sch.style.display = 'none';
+    } else if (d.schedule.items && d.schedule.items.length) {
+      var grid = document.getElementById('t8-schedule-grid');
+      if (grid) {
+        grid.innerHTML = '';
+        d.schedule.items.forEach(function(item) {
+          var card = document.createElement('div');
+          card.className = 't8-event-card rv visible';
+          card.innerHTML =
+            '<div class="t8-event-icon">' + (item.icon || '✨') + '</div>' +
+            '<div class="t8-event-info">' +
+              '<div class="t8-event-name">' + (item.name || '') + '</div>' +
+              '<div class="t8-event-time">' + (item.time || '') + '</div>' +
+              (item.desc ? '<div class="t8-event-desc">' + item.desc + '</div>' : '') +
+            '</div>';
+          grid.appendChild(card);
+        });
+      }
+    }
+  }
+
+  // Venue
+  if (d.venue) {
+    if (d.venue.enabled === false) {
+      var venEl = document.getElementById('t8-venue');
+      if (venEl) venEl.style.display = 'none';
+    } else if (d.venue.items && d.venue.items.length) {
+      var vGrid = document.getElementById('t8-venue-grid');
+      if (vGrid) {
+        vGrid.innerHTML = '';
+        d.venue.items.forEach(function(v) {
+          var card = document.createElement('div');
+          card.className = 't8-venue-card rv visible';
+          card.innerHTML =
+            '<div class="t8-venue-icon">' + (v.icon || '🏛️') + '</div>' +
+            '<div class="t8-venue-name">' + (v.name || '') + '</div>' +
+            '<div class="t8-venue-address">' + (v.address || '') + '</div>' +
+            (v.tags && v.tags.length ? v.tags.map(function(t){ return '<span class="t8-venue-tag">' + t + '</span>'; }).join('') : '');
+          vGrid.appendChild(card);
+        });
+      }
+    }
+  }
+
+  // Location map
+  if (d.location && d.location.embedUrl) {
+    var mapFrame = document.getElementById('t8-map-frame');
+    if (mapFrame) {
+      mapFrame.innerHTML = '<iframe src="' + d.location.embedUrl + '" allowfullscreen loading="lazy"></iframe>';
+    }
+  }
+
+  // Family
+  if (d.family) {
+    var hasMembers = false;
+    function renderList(members, containerId) {
+      var container = document.getElementById(containerId);
+      if (!container || !members || !members.length) return;
+      container.innerHTML = '';
+      members.forEach(function(m) {
+        if (!m.name) return;
+        hasMembers = true;
+        var card = document.createElement('div');
+        card.className = 't8-member-card';
+        card.innerHTML =
+          '<div class="t8-member-emoji">' + (m.emoji || '👤') + '</div>' +
+          '<div><div class="t8-member-name">' + m.name + '</div>' +
+          '<div class="t8-member-role">' + (m.role || '') + '</div></div>';
+        container.appendChild(card);
+      });
+    }
+    renderList(d.family.groomSide, 't8-groom-list');
+    renderList(d.family.brideSide, 't8-bride-list');
+
+    // Update col titles with actual names
+    if (d.hero) {
+      var gl = document.getElementById('t8-groom-label');
+      var bl = document.getElementById('t8-bride-label');
+      if (gl && d.hero.groomName) gl.textContent = d.hero.groomName + "'s Family";
+      if (bl && d.hero.brideName) bl.textContent = d.hero.brideName + "'s Family";
+    }
+
+    var famSec = document.getElementById('t8-family');
+    if (famSec && hasMembers && d.family.enabled !== false) famSec.style.display = 'block';
+  }
+
+  // Gallery
+  if (d.gallery) {
+    if (d.gallery.enabled === false) {
+      var galSec = document.getElementById('t8-gallery');
+      if (galSec) galSec.style.display = 'none';
+    } else if (d.gallery.items) {
+      var cells = document.querySelectorAll('.t8-g-item');
+      d.gallery.items.forEach(function(item, i) {
+        var cell = cells[i];
+        if (!cell) return;
+        if (item.url) {
+          cell.innerHTML = '<img src="' + item.url + '" alt="' + (item.caption || 'Gallery') + '">';
+        } else if (item.emoji) {
+          cell.textContent = item.emoji;
+        }
+      });
+    }
+  }
+
+  // Countdown visibility
+  if (d.countdown && d.countdown.enabled === false) {
+    var cdSec = document.getElementById('t8-countdown');
+    if (cdSec) cdSec.style.display = 'none';
+  }
+
+  // Thank you / footer message
+  if (d.thankyou) {
+    if (d.thankyou.enabled === false) {
+      var tyEl = document.getElementById('t8-footer');
+      if (tyEl) tyEl.style.display = 'none';
+    } else if (d.thankyou.message) {
+      var msgEl = document.getElementById('t8-thankyou-msg');
+      if (msgEl) msgEl.textContent = d.thankyou.message;
+    }
+  }
+
+  // Languages
+  if (window.WeddingTranslate) {
+    window.WeddingTranslate.reset();
+    window.WeddingTranslate.buildSwitcher(
+      document.getElementById('lang-switcher'),
+      (d.languages && d.languages.selected) || ['en']
+    );
+  }
+}
+
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'UPDATE_DATA') applyData(e.data.data);
+});
+</script>
+<script src="translate.js"></script>
+</body>
+</html>

@@ -34,10 +34,40 @@ export const TEMPLATES = [
     thumbnail: '🏮',
   },
   {
+    id: 'template7',
+    name: 'Modern Elegance',
+    description: 'Burgundy & gold with sticky category nav, countdown timer and RSVP form.',
+    thumbnail: '🕯️',
+  },
+  {
     id: 'template5',
     name: 'Temple Kolam',
     description: 'Deep crimson & gold with temple background, kolam patterns and Cinzel headings.',
     thumbnail: '🛕',
+  },
+  {
+    id: 'template6',
+    name: 'Floral Minimalism',
+    description: 'Elegant cream backdrop with line-art floral elements and classic serif typography.',
+    thumbnail: '🌸',
+  },
+  {
+    id: 'template8',
+    name: 'Navy & Gold',
+    description: 'Dark navy with champagne gold accents, Playfair Display serif and blush venue cards.',
+    thumbnail: '🥂',
+  },
+  {
+    id: 'template9',
+    name: 'Pastel Garden',
+    description: 'Soft pastel background with botanical illustrations, timeline, and an interactive pop-up entrance.',
+    thumbnail: '🌿',
+  },
+  {
+    id: 'template10',
+    name: 'Desert Blossom',
+    description: 'Modern desert aesthetic with canvas video blending, botanical graphics, and pastel layout.',
+    thumbnail: '🏺',
   },
 ];
 
