@@ -34,7 +34,6 @@ export default async function handler(req, res) {
   } catch (_) {}
 
   const pageUrl  = `${BASE_URL}/w/${slug}`;
-  const imageUrl = `${BASE_URL}/fotokaran-logo.png`;
   const title    = `${groom} & ${bride} — Wedding Invitation`;
   const desc     = `You are cordially invited to celebrate the wedding of ${groom} & ${bride}${date ? ' on ' + date : ''}${city ? ' in ' + city : ''}.`;
 
@@ -49,16 +48,12 @@ export default async function handler(req, res) {
   <meta property="og:url"         content="${pageUrl}"/>
   <meta property="og:title"       content="${title}"/>
   <meta property="og:description" content="${desc}"/>
-  <meta property="og:image"       content="${imageUrl}"/>
-  <meta property="og:image:width" content="1200"/>
-  <meta property="og:image:height"content="630"/>
   <meta property="og:site_name"   content="Fotokaran Studio"/>
 
   <!-- Twitter Card -->
-  <meta name="twitter:card"        content="summary_large_image"/>
+  <meta name="twitter:card"        content="summary"/>
   <meta name="twitter:title"       content="${title}"/>
   <meta name="twitter:description" content="${desc}"/>
-  <meta name="twitter:image"       content="${imageUrl}"/>
 
   <!-- Redirect humans to the SPA -->
   <meta http-equiv="refresh" content="0;url=${pageUrl}"/>
