@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import * as LucideIcons from 'lucide-react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
@@ -308,7 +308,7 @@ export default function WebsiteBuilder() {
   const isPublicMode = location.pathname.startsWith('/w/');
 
   const [configId, setConfigId] = useState(null);
-  const [templateId, setTemplateId] = useState('template1');
+  const [templateId, setTemplateId] = useState('template4');
   const [data, setData] = useState(DEFAULT_DATA);
   const [isPublished, setIsPublished] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -325,6 +325,7 @@ export default function WebsiteBuilder() {
   const [slug, setSlug] = useState('');
   const [eventUserId, setEventUserId] = useState('');
   const [eventName, setEventName] = useState('');
+  const GalleryFormMemo = useMemo(() => makeGalleryForm(eventUserId, eventName), [eventUserId, eventName]);
 
   const generateSlug = (heroData) => {
     const g = (heroData?.groomName || '').trim();
@@ -348,7 +349,11 @@ export default function WebsiteBuilder() {
       const { data: existing } = await supabase.from('website_configs').select('*').eq('event_id', eventId).single();
       if (existing) {
         setConfigId(existing.id);
-        setTemplateId(existing.template_id || 'template1');
+        const savedTemplate = existing.template_id || 'template4';
+        setTemplateId(savedTemplate);
+        const CATEGORY_MAP = { modern: ['template4','template6','template7','template8','template9'], hindu: ['template3','template5'], muslim: ['template2'], christian: ['template1'] };
+        const matchedCat = Object.keys(CATEGORY_MAP).find(cat => CATEGORY_MAP[cat].includes(savedTemplate));
+        if (matchedCat) setTemplateCategory(matchedCat);
         setData(deepMerge(DEFAULT_DATA, existing.data || {}));
         setIsPublished(existing.is_published ?? true);
         setSlug(existing.slug || '');
@@ -638,7 +643,7 @@ export default function WebsiteBuilder() {
                   const enabled = secData.enabled !== false;
                   const isOpen = activeSection === sec.key;
                   const Form = sec.key === 'gallery'
-                    ? makeGalleryForm(eventUserId, eventName)
+                    ? GalleryFormMemo
                     : SECTION_FORMS[sec.key];
 
                   return (
