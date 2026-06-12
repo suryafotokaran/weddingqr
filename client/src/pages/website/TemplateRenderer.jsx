@@ -9,6 +9,7 @@ import Template8 from './templates/Template8';
 import Template9 from './templates/Template9';
 import Template10 from './templates/Template10';
 
+
 const MAP = {
   template1: Template1,
   template2: Template2,
@@ -20,6 +21,7 @@ const MAP = {
   template8: Template8,
   template9: Template9,
   template10: Template10,
+
 };
 
 /**

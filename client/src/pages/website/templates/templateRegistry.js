@@ -12,7 +12,7 @@ export const TEMPLATES = [
   {
     id: 'template1',
     name: 'Sacred Grace',
-    description: 'Rich dark tones with gold accents. Mandala rings & falling petals.',
+    description: 'Premium champagne cork pop preloader. Interactive music overlay, sticky floating nav, and elegant storytelling elements.',
     thumbnail: '✝️',
   },
   {
@@ -69,6 +69,7 @@ export const TEMPLATES = [
     description: 'Modern desert aesthetic with canvas video blending, botanical graphics, and pastel layout.',
     thumbnail: '🏺',
   },
+
 ];
 
 /**
