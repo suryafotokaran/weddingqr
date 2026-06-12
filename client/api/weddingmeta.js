@@ -34,7 +34,7 @@ export default async function handler(req, res) {
   } catch (_) {}
 
   const pageUrl  = `${BASE_URL}/w/${slug}`;
-  const imageUrl = `${BASE_URL}/api/og-image?groom=${encodeURIComponent(groom)}&bride=${encodeURIComponent(bride)}&date=${encodeURIComponent(date)}`;
+  const imageUrl = `${BASE_URL}/fotokaran-logo.png`;
   const title    = `${groom} & ${bride} — Wedding Invitation`;
   const desc     = `You are cordially invited to celebrate the wedding of ${groom} & ${bride}${date ? ' on ' + date : ''}${city ? ' in ' + city : ''}.`;
 
