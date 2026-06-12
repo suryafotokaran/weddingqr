@@ -4,11 +4,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { TEMPLATES, SECTIONS, DEFAULT_DATA } from './templates/templateRegistry';
 import TemplateRenderer from './TemplateRenderer';
-import { IPhoneFrame } from 'react-framify';
 import { ChevronLeft, ChevronDown, ChevronUp, Globe, Copy, Check, Plus, Trash2, Eye, EyeOff, Smartphone, Upload, ImageIcon, Pencil, Sparkles, EyeOff as Unpublish } from 'lucide-react';
 
-// 1×1 transparent GIF — required by IPhoneFrame's screenshotList prop
-const TRANSPARENT_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 import Toast from '../../components/Toast';
 import { uploadToR2 } from '../../lib/s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -786,23 +783,24 @@ export default function WebsiteBuilder() {
                     dynamic island:   top=19px, centered, 74×26px
                 */}
                 <div style={{ position:'relative' }}>
-                  {/* Fix react-framify's figure CSS and hide nav buttons */}
-                  <style>{`
-                    .phone__frameset--wrapper {
-                      position: static !important;
-                      top: auto !important;
-                      left: auto !important;
-                      margin-top: 0 !important;
-                      transform: none !important;
-                    }
-                    .preview__scroll--btns { display: none !important; }
-                  `}</style>
-
-                  <IPhoneFrame
-                    screenshotList={[TRANSPARENT_IMG]}
-                    statusBar={{ mode: 'dark' }}
-                    deviceColor="#1c1c1e"
-                  />
+                  {/* CSS iPhone frame — exact same outer dims as react-framify IPhoneFrame */}
+                  <div style={{
+                    width: 250.38,
+                    height: 507.5,
+                    background: '#1c1c1e',
+                    borderRadius: 44,
+                    border: '3px solid #3a3a3c',
+                    boxShadow: '0 0 0 1px #000, inset 0 0 0 1px #2c2c2e, 0 24px 64px rgba(0,0,0,0.7)',
+                    position: 'relative',
+                    boxSizing: 'border-box',
+                  }}>
+                    {/* Side buttons — volume up */}
+                    <div style={{ position:'absolute', left:-5, top:100, width:4, height:28, background:'#3a3a3c', borderRadius:'2px 0 0 2px' }} />
+                    {/* Side buttons — volume down */}
+                    <div style={{ position:'absolute', left:-5, top:138, width:4, height:28, background:'#3a3a3c', borderRadius:'2px 0 0 2px' }} />
+                    {/* Side buttons — power */}
+                    <div style={{ position:'absolute', right:-5, top:120, width:4, height:56, background:'#3a3a3c', borderRadius:'0 2px 2px 0' }} />
+                  </div>
 
                   {/* ── Live website content ── */}
                   {/*
@@ -814,7 +812,7 @@ export default function WebsiteBuilder() {
                     The iframe inside fills 430×932 and handles its own scrolling.
                   */}
                   <div style={{
-                    position:'absolute', top:12, left:15,
+                    position:'absolute', top:12, left:12,
                     width:226, height:484,
                     overflow:'hidden', borderRadius:35,
                     zIndex:15,
@@ -849,7 +847,7 @@ export default function WebsiteBuilder() {
 
                   {/* ── Status bar ── */}
                   <div style={{
-                    position:'absolute', top:12, left:15, width:226,
+                    position:'absolute', top:12, left:12, width:226,
                     height:40, display:'flex', alignItems:'center',
                     justifyContent:'space-between',
                     paddingLeft:14, paddingRight:12, paddingTop:10,
