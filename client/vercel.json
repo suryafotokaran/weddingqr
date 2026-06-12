@@ -4,6 +4,17 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/w/:slug",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(whatsapp|facebookexternalhit|facebookcatalog|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|googlebot|bingbot|yandex|applebot|viber|line\\/|snapchat|pinterest|tumblr|vkshare|xing).*"
+        }
+      ],
+      "destination": "/api/weddingmeta?slug=:slug"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
